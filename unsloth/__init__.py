@@ -256,7 +256,7 @@ from unsloth_zoo.rl_environments import (
     launch_openenv,
 )
 
-# FP8 Mixed Precision Training Support (via Transformer Engine)
+# FP8 Mixed Precision Training Support (NVIDIA Transformer Engine via Accelerate)
 from .models._utils import (
     setup_fp8_mixed_precision_training,
     check_fp8_training_support,

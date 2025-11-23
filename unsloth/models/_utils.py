@@ -2334,17 +2334,15 @@ def check_fp8_training_support():
 
 
 def setup_fp8_mixed_precision_training(
-    backend = "TE",
     fp8_format = "HYBRID",
     amax_history_len = 32,
     amax_compute_algo = "max",
 ):
     """
-    Setup FP8 mixed precision training via environment variables.
+    Setup FP8 mixed precision training using NVIDIA Transformer Engine.
 
     This configures HuggingFace Accelerate to use FP8 mixed precision training
-    with either NVIDIA Transformer Engine or MS-AMP (torchao). Call this before
-    creating your Trainer.
+    with NVIDIA Transformer Engine. Call this before creating your Trainer.
 
     FP8 mixed precision training provides:
     - ~40% memory reduction vs BF16/FP16
@@ -2352,87 +2350,78 @@ def setup_fp8_mixed_precision_training(
     - Minimal accuracy degradation (~99% maintained)
 
     Args:
-        backend (str): FP8 backend - "TE" (Transformer Engine) or "MSAMP" (torchao)
-            - "TE": NVIDIA Transformer Engine (optimal for H100/H200)
-            - "MSAMP": Microsoft AMP with torchao (broader GPU support)
-        fp8_format (str): FP8 format - "HYBRID" (E4M3/E5M2), "E4M3", or "E5M2"
-        amax_history_len (int): History length for scaling factor computation
-        amax_compute_algo (str): Algorithm for amax - "max" or "most_recent"
+        fp8_format (str): FP8 format to use. Options:
+            - "HYBRID": E4M3 for forward, E5M2 for backward (recommended)
+            - "E4M3": 4-bit exponent, 3-bit mantissa (higher precision)
+            - "E5M2": 5-bit exponent, 2-bit mantissa (higher range)
+        amax_history_len (int): History length for scaling factor computation.
+            Larger values provide more stable scaling. Default: 32
+        amax_compute_algo (str): Algorithm for computing amax:
+            - "max": Use maximum from history (recommended for stability)
+            - "most_recent": Use most recent value (faster adaptation)
 
     Example:
         >>> from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
         >>>
         >>> # Enable FP8 training with Transformer Engine
-        >>> setup_fp8_mixed_precision_training(backend="TE")
-        >>>
-        >>> # Or use torchao backend
-        >>> setup_fp8_mixed_precision_training(backend="MSAMP")
+        >>> setup_fp8_mixed_precision_training()
         >>>
         >>> # Load model normally
-        >>> model, tokenizer = FastLanguageModel.from_pretrained(...)
-        >>> model = FastLanguageModel.get_peft_model(model, ...)
+        >>> model, tokenizer = FastLanguageModel.from_pretrained(
+        ...     model_name="unsloth/Llama-3.2-1B-Instruct",
+        ...     max_seq_length=2048,
+        ... )
+        >>>
+        >>> # Add LoRA (optional - combine FP8 + LoRA for max efficiency)
+        >>> model = FastLanguageModel.get_peft_model(model, r=16, ...)
         >>>
         >>> # Train with standard trainer - FP8 will be used automatically
         >>> trainer = SFTTrainer(model=model, ...)
         >>> trainer.train()
 
     Note:
+        - Optimized for H100/H200 GPUs (Hopper architecture)
+        - Works on A100 and newer (Ampere+) with reduced performance
+        - Compatible with LoRA/QLoRA for additional memory savings
         - For multi-GPU: Use `accelerate launch` with FP8 config
         - For advanced control: Use accelerate config file
-        - Compatible with LoRA/QLoRA for additional memory savings
-        - Transformer Engine (TE) is optimal for H100/H200
-        - MSAMP/torchao has broader GPU support including A100
+
+    Reference:
+        Based on HuggingFace Accelerate's Transformer Engine integration:
+        https://github.com/huggingface/accelerate/tree/main/benchmarks/fp8/transformer_engine
     """
     if not check_fp8_training_support():
         raise RuntimeError(
             "Unsloth: FP8 mixed precision training is not available.\n"
             "Requirements:\n"
-            "  - CUDA GPU (H100/H200 optimal for TE, A100+ for MSAMP)\n"
-            "  - For TE backend: pip install transformer-engine\n"
-            "  - For MSAMP backend: pip install torchao\n"
+            "  - CUDA GPU (H100/H200 optimal, A100+ supported)\n"
+            "  - pip install transformer-engine>=1.0.0\n"
             "  - pip install accelerate>=0.26.0"
         )
 
     import os
 
-    # Validate backend
-    backend = backend.upper()
-    if backend not in ["TE", "MSAMP"]:
-        raise ValueError(
-            f"Unsloth: Invalid FP8 backend '{backend}'. "
-            "Must be 'TE' (Transformer Engine) or 'MSAMP' (torchao)"
+    # Check Transformer Engine is available
+    try:
+        import transformer_engine
+    except ImportError:
+        raise ImportError(
+            "Unsloth: Transformer Engine is required for FP8 training.\n"
+            "Install with: pip install transformer-engine\n"
+            "Note: Requires CUDA 11.8+ and Hopper GPUs (H100/H200) for best performance."
         )
 
-    # Check backend-specific requirements
-    if backend == "TE":
-        try:
-            import transformer_engine
-        except ImportError:
-            raise ImportError(
-                "Unsloth: Transformer Engine backend requires transformer-engine.\n"
-                "Install with: pip install transformer-engine"
-            )
-    elif backend == "MSAMP":
-        try:
-            import torchao
-        except ImportError:
-            raise ImportError(
-                "Unsloth: MSAMP backend requires torchao.\n"
-                "Install with: pip install torchao"
-            )
-
-    # Set environment variables for Accelerate FP8 support
+    # Set environment variables for Accelerate FP8 support with Transformer Engine
     os.environ["ACCELERATE_MIXED_PRECISION"] = "fp8"
-    os.environ["ACCELERATE_FP8_BACKEND"] = backend
+    os.environ["ACCELERATE_FP8_BACKEND"] = "TE"  # Transformer Engine
     os.environ["ACCELERATE_FP8_FORMAT"] = fp8_format
     os.environ["ACCELERATE_FP8_AMAX_HISTORY_LEN"] = str(amax_history_len)
     os.environ["ACCELERATE_FP8_AMAX_COMPUTE_ALGO"] = amax_compute_algo
 
-    backend_name = "Transformer Engine" if backend == "TE" else "MS-AMP (torchao)"
     logger.info(
-        f"Unsloth: FP8 mixed precision training enabled\n"
-        f"  Backend: {backend_name}\n"
+        f"Unsloth: FP8 mixed precision training enabled (Transformer Engine)\n"
         f"  Format: {fp8_format}\n"
         f"  Amax history: {amax_history_len}\n"
-        f"  Amax algo: {amax_compute_algo}"
+        f"  Amax algo: {amax_compute_algo}\n"
+        f"  Note: Optimal on H100/H200 GPUs"
     )

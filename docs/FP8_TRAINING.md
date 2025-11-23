@@ -1,6 +1,6 @@
 # FP8 Mixed Precision Training with Unsloth
 
-This guide explains how to use FP8 (8-bit floating point) mixed precision training with Unsloth, leveraging HuggingFace Accelerate's integration with either NVIDIA Transformer Engine or MS-AMP (torchao).
+This guide explains how to use FP8 (8-bit floating point) mixed precision training with Unsloth, leveraging HuggingFace Accelerate's integration with NVIDIA Transformer Engine.
 
 ## Overview
 
@@ -11,29 +11,26 @@ FP8 mixed precision training provides several benefits:
 - **Maintained Accuracy**: Careful scaling techniques minimize accuracy degradation (~99% maintained)
 - **Larger Batch Sizes**: Lower memory usage allows for larger batch sizes
 
-## FP8 Backends
+## What is Transformer Engine?
 
-Unsloth supports two FP8 backends via HuggingFace Accelerate:
+NVIDIA Transformer Engine is a library for accelerating transformer models with FP8 precision:
 
-### Transformer Engine (TE)
-- **Best for**: H100, H200 (Hopper GPUs)
-- **Pros**: Optimal performance on Hopper, extensive optimizations
-- **Cons**: Requires CUDA 11.8+, limited to newer GPUs
-- **Install**: `pip install transformer-engine`
-
-### MS-AMP (MSAMP) with torchao
-- **Best for**: A100, RTX 4090, broader GPU support
-- **Pros**: Works on Ampere and newer, easier to install
-- **Cons**: Slightly slower than TE on Hopper
-- **Install**: `pip install torchao`
+- **FP8 Tensor Cores**: Leverages specialized hardware on Hopper GPUs (H100, H200)
+- **Automatic Mixed Precision**: Dynamically chooses FP8 vs higher precision
+- **Scaling & Clipping**: Automatic handling of FP8's limited range
+- **Seamless Integration**: Works with HuggingFace Transformers via Accelerate
 
 ## Requirements
 
 ### Hardware Requirements
 
 - **Optimal**: NVIDIA H100, H200 (Hopper architecture, compute capability 9.0)
-- **Supported**: NVIDIA A100, RTX 4090 (Ampere/Ada, compute capability 8.0+)
-- **Minimum**: Any CUDA-capable GPU (may have reduced performance)
+  - Full FP8 tensor core support
+  - Maximum performance gains
+- **Supported**: NVIDIA A100 (Ampere, compute capability 8.0)
+  - FP8 support via emulation
+  - Reduced but still significant gains
+- **Minimum**: CUDA compute capability 8.0+
 
 ### Software Requirements
 
@@ -44,10 +41,11 @@ pip install transformers>=4.35.0
 pip install accelerate>=0.26.0
 pip install unsloth
 
-# Backend (choose one or both)
-pip install transformer-engine>=1.0.0  # For TE backend (H100/H200)
-pip install torchao  # For MSAMP backend (A100+)
+# Transformer Engine (required for FP8 training)
+pip install transformer-engine>=1.0.0
 ```
+
+**Note**: Transformer Engine requires CUDA 11.8+ or CUDA 12.0+
 
 ## Quick Start
 
@@ -58,9 +56,8 @@ from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from transformers import TrainingArguments
 from trl import SFTTrainer
 
-# Enable FP8 training (choose backend)
-setup_fp8_mixed_precision_training(backend="TE")  # For H100/H200
-# setup_fp8_mixed_precision_training(backend="MSAMP")  # For A100+
+# Enable FP8 training with Transformer Engine
+setup_fp8_mixed_precision_training()
 
 # Load model
 model, tokenizer = FastLanguageModel.from_pretrained(
