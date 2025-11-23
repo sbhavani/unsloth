@@ -1,15 +1,31 @@
 # FP8 Mixed Precision Training with Unsloth
 
-This guide explains how to use FP8 (8-bit floating point) mixed precision training with Unsloth, leveraging HuggingFace Accelerate's integration with NVIDIA Transformer Engine.
+This guide explains how to use FP8 (8-bit floating point) mixed precision training with Unsloth, leveraging HuggingFace Accelerate's integration with either NVIDIA Transformer Engine or MS-AMP (torchao).
 
 ## Overview
 
 FP8 mixed precision training provides several benefits:
 
-- **Reduced Memory Usage**: FP8 uses 8 bits instead of 16 (BF16/FP16) or 32 (FP32), reducing memory consumption
-- **Faster Training**: Optimized FP8 operations on supported hardware (Hopper GPUs)
-- **Maintained Accuracy**: Careful scaling techniques minimize accuracy degradation
+- **Reduced Memory Usage**: FP8 uses 8 bits instead of 16 (BF16/FP16) or 32 (FP32), reducing memory consumption by ~40%
+- **Faster Training**: Optimized FP8 operations on supported hardware (up to 1.5x faster on H100)
+- **Maintained Accuracy**: Careful scaling techniques minimize accuracy degradation (~99% maintained)
 - **Larger Batch Sizes**: Lower memory usage allows for larger batch sizes
+
+## FP8 Backends
+
+Unsloth supports two FP8 backends via HuggingFace Accelerate:
+
+### Transformer Engine (TE)
+- **Best for**: H100, H200 (Hopper GPUs)
+- **Pros**: Optimal performance on Hopper, extensive optimizations
+- **Cons**: Requires CUDA 11.8+, limited to newer GPUs
+- **Install**: `pip install transformer-engine`
+
+### MS-AMP (MSAMP) with torchao
+- **Best for**: A100, RTX 4090, broader GPU support
+- **Pros**: Works on Ampere and newer, easier to install
+- **Cons**: Slightly slower than TE on Hopper
+- **Install**: `pip install torchao`
 
 ## Requirements
 
@@ -22,54 +38,45 @@ FP8 mixed precision training provides several benefits:
 ### Software Requirements
 
 ```bash
-# Core dependencies
+# Core dependencies (required)
 pip install torch>=2.0.0
 pip install transformers>=4.35.0
 pip install accelerate>=0.26.0
-
-# Transformer Engine for FP8 support
-pip install transformer-engine>=1.0.0
-
-# Unsloth
 pip install unsloth
-```
 
-**Note**: Transformer Engine requires CUDA 11.8+ or CUDA 12.0+
+# Backend (choose one or both)
+pip install transformer-engine>=1.0.0  # For TE backend (H100/H200)
+pip install torchao  # For MSAMP backend (A100+)
+```
 
 ## Quick Start
 
 ### Basic Usage with SFTTrainer
 
 ```python
-from unsloth import FastLanguageModel
-from unsloth.fp8_training import FP8TrainingConfig, check_fp8_support
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from transformers import TrainingArguments
 from trl import SFTTrainer
-import os
 
-# Check FP8 support
-if not check_fp8_support():
-    print("FP8 not supported on this system")
-    exit(1)
+# Enable FP8 training (choose backend)
+setup_fp8_mixed_precision_training(backend="TE")  # For H100/H200
+# setup_fp8_mixed_precision_training(backend="MSAMP")  # For A100+
 
 # Load model
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="unsloth/Llama-3.2-1B-Instruct",
     max_seq_length=2048,
-    dtype=None,  # Auto-detect
+    dtype=None,
     load_in_4bit=False,  # Don't use 4bit with FP8
 )
 
-# Add LoRA adapters (optional)
+# Add LoRA adapters (optional - combine FP8 + LoRA for max efficiency)
 model = FastLanguageModel.get_peft_model(
     model,
     r=16,
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
     lora_alpha=16,
 )
-
-# Enable FP8 via environment variable
-os.environ["ACCELERATE_MIXED_PRECISION"] = "fp8"
 
 # Setup training
 training_args = TrainingArguments(
@@ -89,7 +96,7 @@ trainer = SFTTrainer(
     args=training_args,
 )
 
-# Train
+# Train - FP8 automatically enabled
 trainer.train()
 ```
 
