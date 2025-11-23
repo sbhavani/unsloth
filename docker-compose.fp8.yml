@@ -1,0 +1,57 @@
+# Docker Compose for FP8 Training Benchmarks
+#
+# Usage:
+#   docker-compose -f docker-compose.fp8.yml up -d
+#   docker-compose -f docker-compose.fp8.yml exec unsloth-fp8 bash
+#   docker-compose -f docker-compose.fp8.yml down
+
+version: '3.8'
+
+services:
+  unsloth-fp8:
+    build:
+      context: .
+      dockerfile: Dockerfile.fp8
+    image: unsloth-fp8:latest
+    container_name: unsloth-fp8-benchmark
+
+    # GPU configuration
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+    # Environment variables
+    environment:
+      - CUDA_VISIBLE_DEVICES=0  # Use first GPU (change as needed)
+      - TRANSFORMERS_CACHE=/workspace/cache
+      - HF_HOME=/workspace/cache
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+
+    # Volumes
+    volumes:
+      # Mount local Unsloth code (for development)
+      - .:/workspace/unsloth
+
+      # Persist outputs
+      - ./outputs:/workspace/outputs
+
+      # Cache models (speeds up subsequent runs)
+      - huggingface_cache:/workspace/cache
+
+    # Working directory
+    working_dir: /workspace/unsloth/examples
+
+    # Keep container running
+    stdin_open: true
+    tty: true
+
+    # Override command for interactive use
+    command: bash
+
+volumes:
+  huggingface_cache:
+    driver: local

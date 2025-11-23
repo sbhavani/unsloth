@@ -1,0 +1,96 @@
+# Dockerfile for FP8 Mixed Precision Training Benchmarks
+# Base: NVIDIA PyTorch container with Transformer Engine support
+#
+# Build:
+#   docker build -f Dockerfile.fp8 -t unsloth-fp8:latest .
+#
+# Run (requires NVIDIA GPU with compute capability 8.0+):
+#   docker run --gpus all -it --rm unsloth-fp8:latest
+#
+# Run benchmark:
+#   docker run --gpus all -it --rm unsloth-fp8:latest python examples/benchmark_fp8_vs_bf16.py
+#
+# Interactive shell:
+#   docker run --gpus all -it --rm unsloth-fp8:latest bash
+
+FROM nvcr.io/nvidia/pytorch:25.10-py3
+
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+ENV CUDA_HOME=/usr/local/cuda
+
+LABEL maintainer="Unsloth AI"
+LABEL description="Unsloth with FP8 mixed precision training support (Transformer Engine)"
+LABEL version="1.0"
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    git \
+    wget \
+    curl \
+    vim \
+    htop \
+    nvtop \
+    && rm -rf /var/lib/apt/lists/*
+
+# Upgrade pip and install build tools
+RUN pip install --upgrade pip setuptools wheel
+
+# Install Transformer Engine
+# Note: The base image should already have TE, but we ensure it's the latest
+RUN pip install --no-cache-dir transformer-engine[pytorch]>=1.0.0
+
+# Install HuggingFace ecosystem
+RUN pip install --no-cache-dir \
+    transformers>=4.35.0 \
+    accelerate>=0.26.0 \
+    datasets>=2.14.0 \
+    tokenizers>=0.15.0 \
+    peft>=0.7.0 \
+    trl>=0.7.0
+
+# Install other training dependencies
+RUN pip install --no-cache-dir \
+    bitsandbytes>=0.41.0 \
+    scipy \
+    sentencepiece \
+    protobuf
+
+# Copy Unsloth source code
+WORKDIR /workspace
+COPY . /workspace/unsloth/
+
+# Install Unsloth in development mode
+WORKDIR /workspace/unsloth
+RUN pip install -e .
+
+# Create directory for outputs
+RUN mkdir -p /workspace/outputs
+
+# Set working directory to examples
+WORKDIR /workspace/unsloth/examples
+
+# Verify installation
+RUN python -c "import torch; print(f'PyTorch: {torch.__version__}')" && \
+    python -c "import transformer_engine; print(f'Transformer Engine: {transformer_engine.__version__}')" && \
+    python -c "import accelerate; print(f'Accelerate: {accelerate.__version__}')" && \
+    python -c "from unsloth import FastLanguageModel; print('Unsloth: OK')" && \
+    python -c "from unsloth import check_fp8_training_support; print(f'FP8 Support: {check_fp8_training_support()}')"
+
+# Print GPU info on container start
+RUN echo '#!/bin/bash\n\
+echo "=========================================="\n\
+echo "Unsloth FP8 Training Container"\n\
+echo "=========================================="\n\
+nvidia-smi --query-gpu=gpu_name,compute_cap,driver_version,memory.total --format=csv,noheader\n\
+echo "=========================================="\n\
+echo "Available Examples:"\n\
+echo "  - python test_fp8_quick.py"\n\
+echo "  - python fp8_finetuning_example.py"\n\
+echo "  - python benchmark_fp8_vs_bf16.py"\n\
+echo "=========================================="\n\
+exec "$@"' > /entrypoint.sh && chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["bash"]
