@@ -78,6 +78,7 @@ def main():
     print("\n[1/5] Enabling FP8 mixed precision training...")
 
     setup_fp8_mixed_precision_training(
+        backend="te",             # "te" = Transformer Engine (matches Accelerate convention)
         fp8_format="HYBRID",      # HYBRID = E4M3 forward + E5M2 backward (recommended)
         amax_history_len=32,      # History for scaling factor computation
         amax_compute_algo="max",  # Use max from history for stability

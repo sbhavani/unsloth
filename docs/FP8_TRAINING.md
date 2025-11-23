@@ -57,7 +57,8 @@ from transformers import TrainingArguments
 from trl import SFTTrainer
 
 # Enable FP8 training with Transformer Engine
-setup_fp8_mixed_precision_training()
+# backend="te" is the default (matches Accelerate's FP8RecipeKwargs convention)
+setup_fp8_mixed_precision_training(backend="te")
 
 # Load model
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -113,36 +114,25 @@ In your `accelerate` config, select:
 - Mixed Precision: FP8
 - Backend: Transformer Engine
 
-### Manual Training Loop
+### Equivalent Accelerate Usage
 
-For more control, use the `FP8Trainer` class:
+Unsloth's `setup_fp8_mixed_precision_training()` is equivalent to:
 
 ```python
-from unsloth.fp8_training import FP8Trainer, FP8TrainingConfig
+from accelerate import Accelerator
+from accelerate.utils import FP8RecipeKwargs
 
-# Setup FP8 config
-fp8_config = FP8TrainingConfig(
-    fp8_format="HYBRID",
-    amax_history_len=32,
-    amax_compute_algo="max",
-)
+# This is what Unsloth does internally
+kwargs = [FP8RecipeKwargs(backend="te", fp8_format="HYBRID", amax_history_len=32)]
+accelerator = Accelerator(mixed_precision="fp8", kwargs_handlers=kwargs)
 
-# Create FP8 trainer
-fp8_trainer = FP8Trainer(
-    model=model,
-    optimizer=optimizer,
-    fp8_config=fp8_config,
-    convert_model_to_fp8=True,
-)
-
-# Training loop
-for batch in dataloader:
-    loss = fp8_trainer.training_step(batch)
-    print(f"Loss: {loss.item()}")
-
-# Save model
-fp8_trainer.save_model("model.pt")
+# Prepare model and optimizer
+model, optimizer = accelerator.prepare(model, optimizer)
 ```
+
+Unsloth simplifies this by setting environment variables that Accelerate's
+`Trainer` and `SFTTrainer` automatically detect, so you don't need to manually
+create an Accelerator instance.
 
 ## FP8 Configuration
 

@@ -2334,6 +2334,7 @@ def check_fp8_training_support():
 
 
 def setup_fp8_mixed_precision_training(
+    backend = "te",
     fp8_format = "HYBRID",
     amax_history_len = 32,
     amax_compute_algo = "max",
@@ -2350,6 +2351,8 @@ def setup_fp8_mixed_precision_training(
     - Minimal accuracy degradation (~99% maintained)
 
     Args:
+        backend (str): FP8 backend. Default: "te" (Transformer Engine).
+            Matches Accelerate's FP8RecipeKwargs convention.
         fp8_format (str): FP8 format to use. Options:
             - "HYBRID": E4M3 for forward, E5M2 for backward (recommended)
             - "E4M3": 4-bit exponent, 3-bit mantissa (higher precision)
@@ -2385,6 +2388,7 @@ def setup_fp8_mixed_precision_training(
         - Compatible with LoRA/QLoRA for additional memory savings
         - For multi-GPU: Use `accelerate launch` with FP8 config
         - For advanced control: Use accelerate config file
+        - Follows Accelerate's FP8RecipeKwargs(backend="te") convention
 
     Reference:
         Based on HuggingFace Accelerate's Transformer Engine integration:
@@ -2401,6 +2405,12 @@ def setup_fp8_mixed_precision_training(
 
     import os
 
+    # Validate backend (match Accelerate's convention)
+    if backend.lower() != "te":
+        raise ValueError(
+            f"Unsloth: Currently only 'te' (Transformer Engine) backend is supported. Got: {backend}"
+        )
+
     # Check Transformer Engine is available
     try:
         import transformer_engine
@@ -2411,15 +2421,17 @@ def setup_fp8_mixed_precision_training(
             "Note: Requires CUDA 11.8+ and Hopper GPUs (H100/H200) for best performance."
         )
 
-    # Set environment variables for Accelerate FP8 support with Transformer Engine
+    # Set environment variables for Accelerate FP8 support
+    # Matches: FP8RecipeKwargs(backend="te", fp8_format=..., ...)
     os.environ["ACCELERATE_MIXED_PRECISION"] = "fp8"
-    os.environ["ACCELERATE_FP8_BACKEND"] = "TE"  # Transformer Engine
+    os.environ["ACCELERATE_FP8_BACKEND"] = backend.lower()
     os.environ["ACCELERATE_FP8_FORMAT"] = fp8_format
     os.environ["ACCELERATE_FP8_AMAX_HISTORY_LEN"] = str(amax_history_len)
     os.environ["ACCELERATE_FP8_AMAX_COMPUTE_ALGO"] = amax_compute_algo
 
     logger.info(
         f"Unsloth: FP8 mixed precision training enabled (Transformer Engine)\n"
+        f"  Backend: {backend}\n"
         f"  Format: {fp8_format}\n"
         f"  Amax history: {amax_history_len}\n"
         f"  Amax algo: {amax_compute_algo}\n"
