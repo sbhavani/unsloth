@@ -126,12 +126,15 @@ Results are saved to `benchmark_results.json`
 ## Hardware Requirements
 
 ### FP8 Training
-- **Optimal**: H100, H200 (Hopper GPUs)
+- **Optimal**: H100, H200 (Hopper GPUs, compute capability 9.0)
   - Native FP8 tensor cores
-  - Full performance benefits
-- **Supported**: A100 (Ampere)
-  - FP8 via emulation
-  - Still faster than BF16
+  - 1.3-1.5x speedup
+  - ~40% memory savings
+- **Supported**: RTX 4090, L4 (Ada Lovelace, compute capability 8.9)
+  - Native FP8 support
+  - 1.2-1.3x speedup
+  - ~40% memory savings
+- **Not Supported**: A100 (compute capability 8.0 - below 8.9 minimum)
 
 ### BF16 Baseline
 - Any CUDA GPU with compute capability 8.0+

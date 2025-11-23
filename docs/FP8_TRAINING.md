@@ -25,12 +25,13 @@ NVIDIA Transformer Engine is a library for accelerating transformer models with 
 ### Hardware Requirements
 
 - **Optimal**: NVIDIA H100, H200 (Hopper architecture, compute capability 9.0)
-  - Full FP8 tensor core support
-  - Maximum performance gains
-- **Supported**: NVIDIA A100 (Ampere, compute capability 8.0)
-  - FP8 support via emulation
-  - Reduced but still significant gains
-- **Minimum**: CUDA compute capability 8.0+
+  - Native FP8 tensor cores
+  - Maximum performance: ~1.3-1.5x speedup
+- **Supported**: NVIDIA RTX 4090, L4 (Ada Lovelace, compute capability 8.9)
+  - Native FP8 support
+  - Good performance: ~1.2-1.3x speedup
+- **Not Supported**: A100 (Ampere, compute capability 8.0)
+  - Below minimum compute capability 8.9
 
 ### Software Requirements
 
