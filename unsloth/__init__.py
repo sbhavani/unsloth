@@ -256,5 +256,19 @@ from unsloth_zoo.rl_environments import (
     launch_openenv,
 )
 
+# FP8 Training Support
+try:
+    from .fp8_training import (
+        FP8TrainingConfig,
+        FP8Trainer,
+        get_fp8_accelerator,
+        prepare_model_for_fp8_training,
+        get_fp8_autocast_context,
+        check_fp8_support,
+    )
+except ImportError:
+    # FP8 training not available if dependencies are missing
+    pass
+
 # Patch TRL trainers for backwards compatibility
 _patch_trl_trainer()
