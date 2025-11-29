@@ -39,7 +39,7 @@ import time
 import argparse
 import json
 from datasets import load_dataset
-from transformers import TrainingArguments
+from transformers import TrainingArguments, DataCollatorForLanguageModeling
 from trl import SFTTrainer
 import gc
 
