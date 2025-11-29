@@ -2424,7 +2424,7 @@ def setup_fp8_mixed_precision_training(
     # Set environment variables for Accelerate FP8 support
     # Matches: FP8RecipeKwargs(backend="te", fp8_format=..., ...)
     os.environ["ACCELERATE_MIXED_PRECISION"] = "fp8"
-    os.environ["ACCELERATE_FP8_BACKEND"] = backend.lower()
+    os.environ["ACCELERATE_FP8_BACKEND"] = backend.upper()  # Accelerate expects uppercase "TE"
     os.environ["ACCELERATE_FP8_FORMAT"] = fp8_format
     os.environ["ACCELERATE_FP8_AMAX_HISTORY_LEN"] = str(amax_history_len)
     os.environ["ACCELERATE_FP8_AMAX_COMPUTE_ALGO"] = amax_compute_algo
