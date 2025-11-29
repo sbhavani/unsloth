@@ -74,6 +74,7 @@ def formatting_prompts_func(examples):
     return texts
 
 tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = "right"
 
 # Train
 print("\n[5/5] Running training (10 steps)...")
@@ -91,6 +92,7 @@ trainer = SFTTrainer(
         output_dir="outputs/test_fp8",
         report_to="none",
         dataloader_num_workers=0,         # Disable dataloader multiprocessing
+        dataloader_pad_to_multiple_of=8,  # CRITICAL for FP8: pad sequences to multiples of 8
     ),
 )
 
