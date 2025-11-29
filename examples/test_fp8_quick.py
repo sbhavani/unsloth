@@ -57,14 +57,12 @@ model = FastLanguageModel.get_peft_model(
 print("\n[4/5] Preparing dataset...")
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:100]")
 
-def format_prompts(examples):
-    texts = []
-    for instruction, output in zip(examples["instruction"], examples["output"]):
-        text = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
-        texts.append(text)
-    return {"text": texts}
+def formatting_prompts_func(example):
+    instruction = example["instruction"]
+    output = example["output"]
+    text = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
+    return text
 
-dataset = dataset.map(format_prompts, batched=True, remove_columns=dataset.column_names, num_proc=1)
 tokenizer.pad_token = tokenizer.eos_token
 
 # Train
@@ -74,6 +72,7 @@ trainer = SFTTrainer(
     processing_class=tokenizer,
     train_dataset=dataset,
     max_seq_length=512,
+    formatting_func=formatting_prompts_func,  # Use formatting_func to avoid internal tokenization
     args=TrainingArguments(
         per_device_train_batch_size=2,
         max_steps=10,
