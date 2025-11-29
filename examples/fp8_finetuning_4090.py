@@ -106,7 +106,6 @@ def main():
         model=model,
         processing_class=tokenizer,
         train_dataset=dataset,
-        dataset_text_field="text",
         max_seq_length=MAX_SEQ_LENGTH,
         args=TrainingArguments(
             per_device_train_batch_size=BATCH_SIZE,
