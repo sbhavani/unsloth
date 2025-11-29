@@ -51,6 +51,9 @@ RUN pip install --no-cache-dir \
     sentencepiece \
     protobuf
 
+# Install unsloth_zoo (required by unsloth)
+RUN pip install --no-cache-dir unsloth_zoo>=2025.11.4
+
 # Set up workspace
 WORKDIR /workspace
 
