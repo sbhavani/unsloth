@@ -17,11 +17,13 @@ import os
 # Disable multiprocessing to avoid pickling issues with unsloth
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
+# Import unsloth FIRST before other libraries
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, check_fp8_training_support
+
 import torch
 from datasets import load_dataset
 from transformers import TrainingArguments
 from trl import SFTTrainer
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, check_fp8_training_support
 
 # Check GPU
 if not check_fp8_training_support():
