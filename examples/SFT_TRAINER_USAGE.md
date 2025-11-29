@@ -71,12 +71,21 @@ def formatting_func(examples):
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
+# 6b. Create data collator for FP8 (pads to multiples of 8)
+from transformers import DataCollatorForLanguageModeling
+data_collator = DataCollatorForLanguageModeling(
+    tokenizer=tokenizer,
+    mlm=False,
+    pad_to_multiple_of=8,  # CRITICAL for FP8
+)
+
 # 7. Create trainer
 trainer = SFTTrainer(
     model=model,                      # PEFT model with LoRA
     processing_class=tokenizer,       # NOT 'tokenizer'!
     train_dataset=dataset,            # Raw dataset
     formatting_func=formatting_func,  # On-the-fly formatting
+    data_collator=data_collator,      # FP8 padding collator
     args=TrainingArguments(
         per_device_train_batch_size=4,
         gradient_accumulation_steps=4,
@@ -87,8 +96,7 @@ trainer = SFTTrainer(
         logging_steps=10,
         output_dir="outputs",
         report_to="none",
-        dataloader_num_workers=0,          # CRITICAL: Disable multiprocessing
-        dataloader_pad_to_multiple_of=8,   # CRITICAL: Pad sequences for FP8
+        dataloader_num_workers=0,     # CRITICAL: Disable multiprocessing
     ),
 )
 
@@ -169,6 +177,14 @@ def formatting_func(examples):
 ### 5. Training Arguments for FP8
 
 ```python
+# Create data collator with FP8 padding
+from transformers import DataCollatorForLanguageModeling
+data_collator = DataCollatorForLanguageModeling(
+    tokenizer=tokenizer,
+    mlm=False,
+    pad_to_multiple_of=8,  # CRITICAL: Pad sequences to multiples of 8
+)
+
 TrainingArguments(
     per_device_train_batch_size=4,      # IMPORTANT: Must be >=4 for FP8
                                         # FP8 requires (batch_size * seq_len) divisible by 8
@@ -176,7 +192,6 @@ TrainingArguments(
     fp16=False,                         # Must disable for FP8
     bf16=False,                         # Must disable for FP8
     dataloader_num_workers=0,           # Must be 0 (no multiprocessing)
-    dataloader_pad_to_multiple_of=8,    # CRITICAL: Pad sequences to multiples of 8
     # ... other args
 )
 ```
@@ -187,7 +202,7 @@ TrainingArguments(
   - Last dimension (hidden size) must be divisible by 16
 - **Required settings:**
   - `per_device_train_batch_size >= 4`
-  - `dataloader_pad_to_multiple_of=8` (pads variable-length sequences)
+  - Use `DataCollatorForLanguageModeling` with `pad_to_multiple_of=8`
   - `tokenizer.padding_side = "right"` (recommended)
 - If you get `AssertionError` about FP8 dims, check these settings
 
@@ -218,20 +233,36 @@ def formatting_func(examples):
 **Solution:** Import unsloth before other libraries (see Import Order above)
 
 ### Error: `AssertionError: FP8 execution requires the product of all dimensions except the last to be divisible by 8...`
-**Solution:** Add padding and increase batch size:
+**Solution:** Use `DataCollatorForLanguageModeling` with `pad_to_multiple_of=8`:
 ```python
-# ❌ WRONG (missing padding and small batch size)
-TrainingArguments(
-    per_device_train_batch_size=2,
+# ❌ WRONG (missing padding collator)
+trainer = SFTTrainer(
+    model=model,
+    processing_class=tokenizer,
+    train_dataset=dataset,
+    # Missing data_collator!
     ...
 )
 
 # ✅ CORRECT (proper FP8 configuration)
+from transformers import DataCollatorForLanguageModeling
+
 tokenizer.padding_side = "right"
-TrainingArguments(
-    per_device_train_batch_size=4,
-    dataloader_pad_to_multiple_of=8,  # This is KEY!
-    ...
+data_collator = DataCollatorForLanguageModeling(
+    tokenizer=tokenizer,
+    mlm=False,
+    pad_to_multiple_of=8,  # This is KEY!
+)
+
+trainer = SFTTrainer(
+    model=model,
+    processing_class=tokenizer,
+    train_dataset=dataset,
+    data_collator=data_collator,  # Add this!
+    args=TrainingArguments(
+        per_device_train_batch_size=4,
+        ...
+    ),
 )
 ```
 
