@@ -205,6 +205,7 @@ def run_benchmark(mode="bf16", num_steps=NUM_TRAIN_STEPS):
         processing_class=tokenizer,
         train_dataset=dataset,
         max_seq_length=MAX_SEQ_LENGTH,
+        dataset_num_proc=1,  # Disable multiprocessing to avoid pickling issues
         args=training_args,
         packing=False,
     )
