@@ -160,6 +160,7 @@ def main():
         seed=3407,
         output_dir=OUTPUT_DIR,
         report_to="none",  # Change to "wandb" if you want W&B logging
+        dataloader_num_workers=0,  # Disable dataloader multiprocessing
     )
 
     trainer = SFTTrainer(
@@ -167,7 +168,7 @@ def main():
         processing_class=tokenizer,
         train_dataset=dataset,
         max_seq_length=MAX_SEQ_LENGTH,
-        dataset_num_proc=1,  # Disable multiprocessing to avoid pickling issues
+        dataset_kwargs={"num_proc": 1},  # Disable multiprocessing to avoid pickling issues
         args=training_args,
         packing=False,
     )

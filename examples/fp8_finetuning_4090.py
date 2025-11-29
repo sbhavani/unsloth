@@ -107,7 +107,7 @@ def main():
         processing_class=tokenizer,
         train_dataset=dataset,
         max_seq_length=MAX_SEQ_LENGTH,
-        dataset_num_proc=1,  # Disable multiprocessing to avoid pickling issues
+        dataset_kwargs={"num_proc": 1},  # Disable multiprocessing to avoid pickling issues
         args=TrainingArguments(
             per_device_train_batch_size=BATCH_SIZE,
             gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,
@@ -123,6 +123,7 @@ def main():
             seed=3407,
             output_dir="outputs/fp8_4090",
             report_to="none",
+            dataloader_num_workers=0,  # Disable dataloader multiprocessing
         ),
         packing=False,
     )

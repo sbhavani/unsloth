@@ -190,6 +190,7 @@ def run_benchmark(mode="bf16", num_steps=NUM_TRAIN_STEPS):
         output_dir=f"outputs/benchmark_{mode}",
         report_to="none",
         save_strategy="no",  # Don't save during benchmark
+        dataloader_num_workers=0,  # Disable dataloader multiprocessing
     )
 
     print(f"\nTraining Configuration:")
@@ -205,7 +206,7 @@ def run_benchmark(mode="bf16", num_steps=NUM_TRAIN_STEPS):
         processing_class=tokenizer,
         train_dataset=dataset,
         max_seq_length=MAX_SEQ_LENGTH,
-        dataset_num_proc=1,  # Disable multiprocessing to avoid pickling issues
+        dataset_kwargs={"num_proc": 1},  # Disable multiprocessing to avoid pickling issues
         args=training_args,
         packing=False,
     )

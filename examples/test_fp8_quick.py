@@ -74,7 +74,7 @@ trainer = SFTTrainer(
     processing_class=tokenizer,
     train_dataset=dataset,
     max_seq_length=512,
-    dataset_num_proc=1,  # Disable multiprocessing to avoid pickling issues
+    dataset_kwargs={"num_proc": 1},  # Disable multiprocessing to avoid pickling issues
     args=TrainingArguments(
         per_device_train_batch_size=2,
         max_steps=10,
@@ -83,6 +83,7 @@ trainer = SFTTrainer(
         logging_steps=5,
         output_dir="outputs/test_fp8",
         report_to="none",
+        dataloader_num_workers=0,  # Also disable dataloader multiprocessing
     ),
 )
 
