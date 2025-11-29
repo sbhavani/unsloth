@@ -37,9 +37,7 @@ RUN apt-get update && apt-get install -y \
 # Upgrade pip and install build tools
 RUN pip install --upgrade pip setuptools wheel
 
-# Install Transformer Engine
-# Note: The base image should already have TE, but we ensure it's the latest
-RUN pip install --no-cache-dir transformer-engine[pytorch]>=1.0.0
+# Note: Transformer Engine is already included in the base NVIDIA PyTorch image
 
 # Install HuggingFace ecosystem
 RUN pip install --no-cache-dir \

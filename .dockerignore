@@ -1,0 +1,44 @@
+# Git files
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts (but keep pyproject.toml!)
+build/
+dist/
+*.egg-info/
+
+# Docker files themselves
+docker-compose*.yml
+
+# CI/CD
+.github/
+
+# Temporary files
+*.tmp
+*.log
+
+# Large image files (optional - comment out if needed)
+# images/
