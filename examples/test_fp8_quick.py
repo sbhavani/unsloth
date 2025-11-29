@@ -71,7 +71,7 @@ tokenizer.pad_token = tokenizer.eos_token
 print("\n[5/5] Running training (10 steps)...")
 trainer = SFTTrainer(
     model=model,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     train_dataset=dataset,
     dataset_text_field="text",
     max_seq_length=512,
