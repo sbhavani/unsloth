@@ -6,9 +6,9 @@ leveraging HuggingFace Accelerate and NVIDIA Transformer Engine for efficient
 finetuning on Hopper GPUs (H100, H200, etc.).
 
 FP8 training provides:
-- ~40% memory reduction vs BF16/FP16
-- ~1.3-1.5x faster training on H100 GPUs
+- ~1.1-1.5x faster training on H100 GPUs (speed is the primary benefit)
 - Minimal accuracy degradation (~99% maintained)
+- Note: FP8 uses MORE memory than BF16 (maintains both FP32 and FP8 copies)
 
 Requirements:
 - NVIDIA GPU (H100/H200 optimal, A100+ supported)
