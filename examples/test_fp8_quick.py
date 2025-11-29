@@ -83,7 +83,7 @@ trainer = SFTTrainer(
     train_dataset=dataset,                # Raw dataset (not pre-tokenized)
     formatting_func=formatting_prompts_func,  # BATCHED: returns list of strings
     args=TrainingArguments(
-        per_device_train_batch_size=2,
+        per_device_train_batch_size=4,    # Must be >=4 for FP8 (batch_size * seq_len divisible by 8)
         max_steps=10,
         fp16=False,                       # Disabled for FP8
         bf16=False,                       # Disabled for FP8
