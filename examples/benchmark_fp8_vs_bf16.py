@@ -51,13 +51,17 @@ import gc
 
 
 # Benchmark Configuration
+# For H100: Use 7B-8B models to see real FP8 benefits
+#   MODEL_NAME = "unsloth/Meta-Llama-3.1-8B-Instruct"
+#   LORA_RANK = 32
+# For smaller GPUs: Use 1B-3B models
 MODEL_NAME = "unsloth/Llama-3.2-1B-Instruct"
 MAX_SEQ_LENGTH = 2048
 BATCH_SIZE = 4  # Must be >=4 for FP8 (batch_size * seq_len must be divisible by 8)
 GRADIENT_ACCUMULATION_STEPS = 4
 NUM_TRAIN_STEPS = 100  # Number of training steps for benchmark
 LEARNING_RATE = 2e-4
-LORA_RANK = 16
+LORA_RANK = 16  # Use 32 for 8B models
 
 # Dataset Configuration
 DATASET_NAME = "yahma/alpaca-cleaned"
