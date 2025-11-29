@@ -2,15 +2,15 @@
 FP8 Finetuning Example - Optimized for RTX 4090
 
 This example is optimized for RTX 4090 (24GB VRAM) with:
-- Increased batch size (FP8 memory savings)
-- Larger model support
+- Leverages FP8 speed improvements
 - Performance tuning for Ada Lovelace
 
 RTX 4090 Notes:
 - Compute capability 8.9 (✅ FP8 supported)
 - Native FP8 support (Ada Lovelace architecture)
 - Expected speedup: ~1.2-1.3x vs BF16
-- Memory savings: ~40%
+- Memory: FP8 uses MORE memory than BF16 (maintains dual precision)
+  Primary benefit is SPEED, not memory
 """
 
 import os

@@ -13,9 +13,10 @@ Hardware Requirements:
 - For BF16 baseline: Any CUDA GPU
 
 Note on Memory Usage:
-- FP8 memory savings are most apparent on LARGER models (7B, 13B, 70B+)
-- On smaller models (1B-3B), FP8 metadata overhead may increase memory usage
-- The primary benefit on small models is SPEED, not memory
+- **FP8 uses MORE memory than BF16** (maintains FP32/BF16 master weights + FP8 compute copies)
+- This is expected behavior for FP8 mixed precision training
+- FP8's benefit is SPEED (1.1-1.5x faster), not memory reduction
+- Memory overhead is proportionally higher on smaller models (1B-3B) vs larger models (7B+)
 
 Usage:
     # Run both benchmarks
