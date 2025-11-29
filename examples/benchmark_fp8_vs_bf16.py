@@ -27,6 +27,10 @@ References:
 - Alpaca Dataset: https://huggingface.co/datasets/yahma/alpaca-cleaned
 """
 
+import os
+# Disable multiprocessing to avoid pickling issues with unsloth
+os.environ["HF_DATASETS_NUM_PROC"] = "1"
+
 import torch
 import time
 import argparse

@@ -24,6 +24,10 @@ Usage:
     accelerate launch fp8_finetuning_example.py
 """
 
+import os
+# Disable multiprocessing to avoid pickling issues with unsloth
+os.environ["HF_DATASETS_NUM_PROC"] = "1"
+
 import torch
 from datasets import load_dataset
 from transformers import TrainingArguments
