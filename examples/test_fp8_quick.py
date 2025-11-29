@@ -76,6 +76,13 @@ def formatting_prompts_func(examples):
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
+# Create data collator with FP8-compatible padding
+data_collator = DataCollatorForLanguageModeling(
+    tokenizer=tokenizer,
+    mlm=False,
+    pad_to_multiple_of=8,  # CRITICAL for FP8: pad sequences to multiples of 8
+)
+
 # Train
 print("\n[5/5] Running training (10 steps)...")
 trainer = SFTTrainer(
@@ -83,6 +90,7 @@ trainer = SFTTrainer(
     processing_class=tokenizer,           # Tokenizer (renamed from 'tokenizer' in TRL >= 0.18)
     train_dataset=dataset,                # Raw dataset (not pre-tokenized)
     formatting_func=formatting_prompts_func,  # BATCHED: returns list of strings
+    data_collator=data_collator,          # Custom collator for FP8 padding
     args=TrainingArguments(
         per_device_train_batch_size=4,    # Must be >=4 for FP8 (batch_size * seq_len divisible by 8)
         max_steps=10,
@@ -92,7 +100,6 @@ trainer = SFTTrainer(
         output_dir="outputs/test_fp8",
         report_to="none",
         dataloader_num_workers=0,         # Disable dataloader multiprocessing
-        dataloader_pad_to_multiple_of=8,  # CRITICAL for FP8: pad sequences to multiples of 8
     ),
 )
 
