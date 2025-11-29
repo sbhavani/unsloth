@@ -168,14 +168,22 @@ def formatting_func(examples):
 
 ```python
 TrainingArguments(
-    per_device_train_batch_size=2,     # Adjust for your GPU
-    gradient_accumulation_steps=4,      # Effective batch size = 2 * 4 = 8
+    per_device_train_batch_size=4,      # IMPORTANT: Must be >=4 for FP8
+                                        # FP8 requires (batch_size * seq_len) divisible by 8
+    gradient_accumulation_steps=4,      # Effective batch size = 4 * 4 = 16
     fp16=False,                         # Must disable for FP8
     bf16=False,                         # Must disable for FP8
     dataloader_num_workers=0,           # Must be 0 (no multiprocessing)
     # ... other args
 )
 ```
+
+**FP8 Dimension Requirements:**
+- Transformer Engine requires specific tensor shapes:
+  - Product of `(batch_size × sequence_length)` must be divisible by 8
+  - Last dimension (hidden size) must be divisible by 16
+- **Recommended:** Use `per_device_train_batch_size >= 4`
+- If you get `AssertionError` about FP8 dims, increase batch size
 
 ## Troubleshooting
 
@@ -202,6 +210,16 @@ def formatting_func(examples):
 
 ### Warning: "Unsloth should be imported before trl, transformers..."
 **Solution:** Import unsloth before other libraries (see Import Order above)
+
+### Error: `AssertionError: FP8 execution requires the product of all dimensions except the last to be divisible by 8...`
+**Solution:** Increase batch size. FP8 requires `(batch_size × seq_len)` divisible by 8:
+```python
+# ❌ WRONG (batch_size=2 may cause issues with certain sequence lengths)
+TrainingArguments(per_device_train_batch_size=2, ...)
+
+# ✅ CORRECT (batch_size=4 or higher recommended)
+TrainingArguments(per_device_train_batch_size=4, ...)
+```
 
 ## Checking Your TRL Version
 
