@@ -67,8 +67,9 @@ def formatting_func(examples):
         texts.append(text)
     return texts
 
-# 6. Set tokenizer padding
+# 6. Set tokenizer padding (important for FP8)
 tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = "right"
 
 # 7. Create trainer
 trainer = SFTTrainer(
@@ -86,7 +87,8 @@ trainer = SFTTrainer(
         logging_steps=10,
         output_dir="outputs",
         report_to="none",
-        dataloader_num_workers=0,     # CRITICAL: Disable multiprocessing
+        dataloader_num_workers=0,          # CRITICAL: Disable multiprocessing
+        dataloader_pad_to_multiple_of=8,   # CRITICAL: Pad sequences for FP8
     ),
 )
 
@@ -174,6 +176,7 @@ TrainingArguments(
     fp16=False,                         # Must disable for FP8
     bf16=False,                         # Must disable for FP8
     dataloader_num_workers=0,           # Must be 0 (no multiprocessing)
+    dataloader_pad_to_multiple_of=8,    # CRITICAL: Pad sequences to multiples of 8
     # ... other args
 )
 ```
@@ -182,8 +185,11 @@ TrainingArguments(
 - Transformer Engine requires specific tensor shapes:
   - Product of `(batch_size × sequence_length)` must be divisible by 8
   - Last dimension (hidden size) must be divisible by 16
-- **Recommended:** Use `per_device_train_batch_size >= 4`
-- If you get `AssertionError` about FP8 dims, increase batch size
+- **Required settings:**
+  - `per_device_train_batch_size >= 4`
+  - `dataloader_pad_to_multiple_of=8` (pads variable-length sequences)
+  - `tokenizer.padding_side = "right"` (recommended)
+- If you get `AssertionError` about FP8 dims, check these settings
 
 ## Troubleshooting
 
@@ -212,13 +218,21 @@ def formatting_func(examples):
 **Solution:** Import unsloth before other libraries (see Import Order above)
 
 ### Error: `AssertionError: FP8 execution requires the product of all dimensions except the last to be divisible by 8...`
-**Solution:** Increase batch size. FP8 requires `(batch_size × seq_len)` divisible by 8:
+**Solution:** Add padding and increase batch size:
 ```python
-# ❌ WRONG (batch_size=2 may cause issues with certain sequence lengths)
-TrainingArguments(per_device_train_batch_size=2, ...)
+# ❌ WRONG (missing padding and small batch size)
+TrainingArguments(
+    per_device_train_batch_size=2,
+    ...
+)
 
-# ✅ CORRECT (batch_size=4 or higher recommended)
-TrainingArguments(per_device_train_batch_size=4, ...)
+# ✅ CORRECT (proper FP8 configuration)
+tokenizer.padding_side = "right"
+TrainingArguments(
+    per_device_train_batch_size=4,
+    dataloader_pad_to_multiple_of=8,  # This is KEY!
+    ...
+)
 ```
 
 ## Checking Your TRL Version
