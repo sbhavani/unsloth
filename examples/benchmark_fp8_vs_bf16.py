@@ -303,7 +303,8 @@ def compare_results(bf16_results, fp8_results):
     # Memory comparison
     bf16_mem = bf16_results["peak_memory_gb"]
     fp8_mem = fp8_results["peak_memory_gb"]
-    mem_reduction = (1 - fp8_mem / bf16_mem) * 100 if bf16_mem > 0 else 0
+    mem_ratio = fp8_mem / bf16_mem if bf16_mem > 0 else 1.0
+    mem_reduction = (1 - mem_ratio) * 100
 
     # Loss comparison
     loss_diff = abs(fp8_results["final_loss"] - bf16_results["final_loss"])
@@ -322,7 +323,13 @@ def compare_results(bf16_results, fp8_results):
     print(f"\n💾 MEMORY")
     print(f"  BF16:  {bf16_mem:.2f} GB")
     print(f"  FP8:   {fp8_mem:.2f} GB")
-    print(f"  Reduction: {mem_reduction:.1f}% {'✅' if mem_reduction > 0 else '⚠️'}")
+    if mem_reduction > 0:
+        print(f"  Reduction: {mem_reduction:.1f}% ✅")
+    elif mem_reduction < -5:  # More than 5% increase is concerning
+        print(f"  Change: {abs(mem_reduction):.1f}% INCREASE ⚠️")
+    else:
+        print(f"  Change: {abs(mem_reduction):.1f}% increase (minor)")
+
 
     print(f"\n📉 LOSS")
     print(f"  BF16:  {bf16_results['final_loss']:.4f}")
@@ -331,7 +338,10 @@ def compare_results(bf16_results, fp8_results):
 
     print(f"\n🎯 SUMMARY")
     print(f"  FP8 is {speedup:.2f}x faster than BF16")
-    print(f"  FP8 uses {mem_reduction:.1f}% less memory")
+    if mem_reduction > 0:
+        print(f"  FP8 uses {mem_reduction:.1f}% less memory")
+    else:
+        print(f"  FP8 uses {abs(mem_reduction):.1f}% MORE memory")
     print(f"  FP8 maintains {100 - loss_diff_pct:.1f}% of BF16 loss accuracy")
 
     # Save results
