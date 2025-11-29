@@ -2,6 +2,30 @@
 
 This guide explains the correct usage of `SFTTrainer` with Unsloth for FP8 training.
 
+## Understanding FP8 Memory Model
+
+**Important:** FP8 training uses **MORE memory** than BF16/FP16, not less. This is expected behavior.
+
+FP8 mixed precision maintains:
+- **Master weights** in FP32/BF16 (for optimizer updates)
+- **FP8 copies** for forward/backward computation  
+- **Scaling factors** and statistics per layer
+
+The benefits of FP8 are:
+- ✅ **Speed**: 1.1-1.5x faster on Hopper GPUs (H100, H200)
+- ✅ **Accuracy**: 99%+ maintained vs BF16
+- ⚠️ **Memory**: Uses more VRAM than BF16 (especially on small models)
+
+**When to use FP8:**
+- Large models (7B+) where speed matters more than memory
+- H100/H200 GPUs with tensor core acceleration
+- Production training where throughput is critical
+
+**When NOT to use FP8:**
+- Small models (<3B) with limited VRAM
+- When memory is the primary bottleneck
+- A100 or older GPUs (use BF16 instead)
+
 ## Key API Changes in TRL >= 0.18
 
 The TRL library has undergone significant API changes. Here's what changed:
