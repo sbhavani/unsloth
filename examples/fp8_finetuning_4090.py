@@ -22,7 +22,7 @@ from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, check
 
 import torch
 from datasets import load_dataset
-from transformers import TrainingArguments
+from transformers import TrainingArguments, DataCollatorForLanguageModeling
 from trl import SFTTrainer
 
 # Check GPU
@@ -103,6 +103,13 @@ def main():
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
+    # Create data collator for FP8 (pads to multiples of 8)
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,
+        pad_to_multiple_of=8,  # CRITICAL for FP8
+    )
+
     # Training
     print("\n[5/5] Starting training...")
     print(f"Effective batch size: {BATCH_SIZE * GRADIENT_ACCUMULATION_STEPS}")
@@ -112,6 +119,7 @@ def main():
         model=model,
         processing_class=tokenizer,
         train_dataset=dataset,
+        data_collator=data_collator,  # FP8 padding collator
         args=TrainingArguments(
             per_device_train_batch_size=BATCH_SIZE,
             gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,

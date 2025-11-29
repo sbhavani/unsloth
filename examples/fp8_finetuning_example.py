@@ -33,7 +33,7 @@ from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, check
 
 import torch
 from datasets import load_dataset
-from transformers import TrainingArguments
+from transformers import TrainingArguments, DataCollatorForLanguageModeling
 from trl import SFTTrainer
 
 # Check FP8 support
@@ -143,9 +143,16 @@ def main():
         num_proc=1,  # Disable multiprocessing to avoid pickling issues
     )
 
-    # Configure tokenizer (pad to multiples of 16 for optimal FP8 performance)
+    # Configure tokenizer (pad to multiples of 8 for FP8 requirements)
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
+
+    # Create data collator for FP8 (pads to multiples of 8)
+    data_collator = DataCollatorForLanguageModeling(
+        tokenizer=tokenizer,
+        mlm=False,
+        pad_to_multiple_of=8,  # CRITICAL for FP8
+    )
 
     # =========================================================================
     # Step 5: Setup Trainer and train
@@ -174,6 +181,7 @@ def main():
         model=model,
         processing_class=tokenizer,
         train_dataset=dataset,
+        data_collator=data_collator,  # FP8 padding collator
         args=training_args,
         packing=False,
     )
