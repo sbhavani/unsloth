@@ -63,11 +63,15 @@ model = FastLanguageModel.get_peft_model(
 print("\n[4/5] Preparing dataset...")
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:100]")
 
-def formatting_prompts_func(example):
-    instruction = example["instruction"]
-    output = example["output"]
-    text = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
-    return text
+def formatting_prompts_func(examples):
+    """Format examples - Unsloth expects a list of strings."""
+    instructions = examples["instruction"]
+    outputs = examples["output"]
+    texts = []
+    for instruction, output in zip(instructions, outputs):
+        text = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
+        texts.append(text)
+    return texts
 
 tokenizer.pad_token = tokenizer.eos_token
 
@@ -77,7 +81,7 @@ trainer = SFTTrainer(
     model=model,                          # PEFT model with LoRA
     processing_class=tokenizer,           # Tokenizer (renamed from 'tokenizer' in TRL >= 0.18)
     train_dataset=dataset,                # Raw dataset (not pre-tokenized)
-    formatting_func=formatting_prompts_func,  # Format examples on-the-fly (no multiprocessing)
+    formatting_func=formatting_prompts_func,  # BATCHED: returns list of strings
     args=TrainingArguments(
         per_device_train_batch_size=2,
         max_steps=10,

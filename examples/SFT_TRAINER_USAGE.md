@@ -51,13 +51,21 @@ model = FastLanguageModel.get_peft_model(
 # 4. Load dataset (raw, not pre-tokenized)
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
 
-# 5. Define formatting function (single example, not batched)
-def formatting_func(example):
-    """Format a single example into text."""
-    instruction = example["instruction"]
-    output = example["output"]
-    text = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
-    return text
+# 5. Define formatting function (BATCHED for Unsloth)
+def formatting_func(examples):
+    """
+    Format examples into text.
+    
+    IMPORTANT: Unsloth's SFTTrainer expects BATCHED formatting_func
+    that returns a LIST of strings, not a single string.
+    """
+    instructions = examples["instruction"]
+    outputs = examples["output"]
+    texts = []
+    for instruction, output in zip(instructions, outputs):
+        text = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
+        texts.append(text)
+    return texts
 
 # 6. Set tokenizer padding
 tokenizer.pad_token = tokenizer.eos_token
@@ -125,27 +133,36 @@ from trl import ...
 - `eval_dataset`: Evaluation dataset
 - `packing`: Whether to pack multiple examples (default: False)
 
-### 4. Formatting Function
+### 4. Formatting Function (BATCHED for Unsloth)
 
 ```python
-def formatting_func(example):
+def formatting_func(examples):
     """
-    Format a SINGLE example (not batched).
+    Format BATCHED examples.
+    
+    IMPORTANT: Unsloth's SFTTrainer expects a BATCHED formatting function
+    that processes multiple examples at once.
     
     Args:
-        example: Dict with keys from your dataset
+        examples: Dict with keys from your dataset, each containing lists
         
     Returns:
-        str: Formatted text
+        list[str]: List of formatted text strings
     """
-    # Your formatting logic
-    return formatted_text
+    instructions = examples["instruction"]
+    outputs = examples["output"]
+    texts = []
+    for instruction, output in zip(instructions, outputs):
+        text = f"### Instruction:\n{instruction}\n\n### Response:\n{output}"
+        texts.append(text)
+    return texts
 ```
 
 **Important:**
-- Takes a **single example dict**, not batched
-- Returns a **string**, not a dict
-- No multiprocessing (happens on-the-fly)
+- Takes a **dict of lists** (batched examples)
+- Returns a **list of strings**
+- Processes multiple examples at once
+- This is different from standard TRL SFTTrainer!
 
 ### 5. Training Arguments for FP8
 
@@ -161,6 +178,18 @@ TrainingArguments(
 ```
 
 ## Troubleshooting
+
+### Error: `ValueError: Unsloth: The formatting_func should return a list of processed strings`
+**Solution:** Your `formatting_func` must be **batched** and return a **list of strings**, not a single string:
+```python
+# ❌ WRONG (returns single string)
+def formatting_func(example):
+    return f"Instruction: {example['instruction']}"
+
+# ✅ CORRECT (returns list of strings)
+def formatting_func(examples):
+    return [f"Instruction: {inst}" for inst in examples['instruction']]
+```
 
 ### Error: `TypeError: cannot pickle 'ConfigModuleInstance' object`
 **Solution:** Set `os.environ["HF_DATASETS_NUM_PROC"] = "1"` before imports
