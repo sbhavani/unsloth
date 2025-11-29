@@ -17,7 +17,7 @@ from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, check
 
 import torch
 from datasets import load_dataset
-from transformers import TrainingArguments
+from transformers import TrainingArguments, DataCollatorForLanguageModeling
 from trl import SFTTrainer
 
 print("=" * 80)
