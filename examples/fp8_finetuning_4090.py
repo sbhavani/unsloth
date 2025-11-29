@@ -92,7 +92,7 @@ def main():
     # Prepare dataset
     print("\n[4/5] Loading dataset...")
     dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
-    dataset = dataset.map(format_prompts, batched=True, remove_columns=dataset.column_names)
+    dataset = dataset.map(format_prompts, batched=True, remove_columns=dataset.column_names, num_proc=1)
 
     tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
@@ -107,7 +107,6 @@ def main():
         processing_class=tokenizer,
         train_dataset=dataset,
         max_seq_length=MAX_SEQ_LENGTH,
-        dataset_kwargs={"num_proc": 1},  # Disable multiprocessing to avoid pickling issues
         args=TrainingArguments(
             per_device_train_batch_size=BATCH_SIZE,
             gradient_accumulation_steps=GRADIENT_ACCUMULATION_STEPS,

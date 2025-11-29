@@ -64,7 +64,7 @@ def format_prompts(examples):
         texts.append(text)
     return {"text": texts}
 
-dataset = dataset.map(format_prompts, batched=True, remove_columns=dataset.column_names)
+dataset = dataset.map(format_prompts, batched=True, remove_columns=dataset.column_names, num_proc=1)
 tokenizer.pad_token = tokenizer.eos_token
 
 # Train
@@ -74,7 +74,6 @@ trainer = SFTTrainer(
     processing_class=tokenizer,
     train_dataset=dataset,
     max_seq_length=512,
-    dataset_kwargs={"num_proc": 1},  # Disable multiprocessing to avoid pickling issues
     args=TrainingArguments(
         per_device_train_batch_size=2,
         max_steps=10,
@@ -83,7 +82,7 @@ trainer = SFTTrainer(
         logging_steps=5,
         output_dir="outputs/test_fp8",
         report_to="none",
-        dataloader_num_workers=0,  # Also disable dataloader multiprocessing
+        dataloader_num_workers=0,
     ),
 )
 

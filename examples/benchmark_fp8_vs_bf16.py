@@ -97,6 +97,7 @@ def prepare_dataset():
         format_alpaca,
         batched=True,
         remove_columns=dataset.column_names,
+        num_proc=1,  # Disable multiprocessing to avoid pickling issues
     )
 
     print(f"Dataset loaded: {len(dataset)} examples")
@@ -206,7 +207,6 @@ def run_benchmark(mode="bf16", num_steps=NUM_TRAIN_STEPS):
         processing_class=tokenizer,
         train_dataset=dataset,
         max_seq_length=MAX_SEQ_LENGTH,
-        dataset_kwargs={"num_proc": 1},  # Disable multiprocessing to avoid pickling issues
         args=training_args,
         packing=False,
     )

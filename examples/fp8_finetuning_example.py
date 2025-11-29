@@ -134,6 +134,7 @@ def main():
         format_prompts,
         batched=True,
         remove_columns=dataset.column_names,
+        num_proc=1,  # Disable multiprocessing to avoid pickling issues
     )
 
     # Configure tokenizer (pad to multiples of 16 for optimal FP8 performance)
@@ -168,7 +169,6 @@ def main():
         processing_class=tokenizer,
         train_dataset=dataset,
         max_seq_length=MAX_SEQ_LENGTH,
-        dataset_kwargs={"num_proc": 1},  # Disable multiprocessing to avoid pickling issues
         args=training_args,
         packing=False,
     )
