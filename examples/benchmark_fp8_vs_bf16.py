@@ -12,6 +12,11 @@ Hardware Requirements:
 - For FP8: H100/H200 (optimal) or A100+ (supported)
 - For BF16 baseline: Any CUDA GPU
 
+Note on Memory Usage:
+- FP8 memory savings are most apparent on LARGER models (7B, 13B, 70B+)
+- On smaller models (1B-3B), FP8 metadata overhead may increase memory usage
+- The primary benefit on small models is SPEED, not memory
+
 Usage:
     # Run both benchmarks
     python benchmark_fp8_vs_bf16.py
