@@ -74,19 +74,19 @@ tokenizer.pad_token = tokenizer.eos_token
 # Train
 print("\n[5/5] Running training (10 steps)...")
 trainer = SFTTrainer(
-    model=model,
-    processing_class=tokenizer,
-    train_dataset=dataset,
-    formatting_func=formatting_prompts_func,
+    model=model,                          # PEFT model with LoRA
+    processing_class=tokenizer,           # Tokenizer (renamed from 'tokenizer' in TRL >= 0.18)
+    train_dataset=dataset,                # Raw dataset (not pre-tokenized)
+    formatting_func=formatting_prompts_func,  # Format examples on-the-fly (no multiprocessing)
     args=TrainingArguments(
         per_device_train_batch_size=2,
         max_steps=10,
-        fp16=False,
-        bf16=False,
+        fp16=False,                       # Disabled for FP8
+        bf16=False,                       # Disabled for FP8
         logging_steps=5,
         output_dir="outputs/test_fp8",
         report_to="none",
-        dataloader_num_workers=0,
+        dataloader_num_workers=0,         # Disable dataloader multiprocessing
     ),
 )
 
