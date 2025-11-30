@@ -1,15 +1,11 @@
 #!/usr/bin/env python3
 """
-FP8 Training with Unsloth - Following Official Pattern
+FP8 Training with Unsloth
 
-This adapts the official Unsloth Llama Alpaca example for FP8 training.
-FP8 provides ~1.3-1.6x speedup on H100 GPUs.
+FP8 provides ~1.3-1.6x speedup on H100 GPUs with Unsloth optimizations.
 
-Key differences from standard Unsloth:
-- FP8 works best with FULL fine-tuning (no LoRA) for maximum speedup
-- Must use accelerator.prepare(model, optimizer) together
-- Gradient checkpointing must be disabled (conflicts with FP8)
-- Use batch_size=8 (8 × any seq_len is always divisible by 8 for FP8)
+NOTE: SFTTrainer has compatibility issues with Accelerate FP8 + variable seq lengths.
+This uses a manual loop with fixed-length padding which works reliably.
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
@@ -17,10 +13,10 @@ os.environ["HF_DATASETS_NUM_PROC"] = "1"
 import torch
 from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from datasets import load_dataset
-from trl import SFTTrainer, SFTConfig
+from torch.utils.data import DataLoader
 
 print("=" * 80)
-print("FP8 Training with Unsloth (Official Pattern)")
+print("FP8 Training with Unsloth")
 print("=" * 80)
 
 # ============================================================================
@@ -30,20 +26,20 @@ print("\n[1/5] Setting up FP8 Accelerator...")
 accelerator = setup_fp8_mixed_precision_training()
 
 # ============================================================================
-# Step 2: Load model (following Unsloth pattern)
+# Step 2: Load model
 # ============================================================================
 print("\n[2/5] Loading model...")
-max_seq_length = 2048
+# Use seq_length divisible by 8
+max_seq_length = 512  # Smaller for memory, divisible by 8
 dtype = torch.bfloat16
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="unsloth/Meta-Llama-3.1-8B-Instruct",
     max_seq_length=max_seq_length,
     dtype=dtype,
-    load_in_4bit=False,  # FP8 works best with full precision, not 4bit
+    load_in_4bit=False,
 )
 
-# For FP8: Use for_training() with gradient_checkpointing=False
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 
 # ============================================================================
@@ -51,17 +47,14 @@ model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 # ============================================================================
 print("\n[3/5] Preparing model with FP8...")
 optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
-
-# CRITICAL: Prepare model and optimizer TOGETHER for FP8!
 model, optimizer = accelerator.prepare(model, optimizer)
 
-# Check TE conversion
 import transformer_engine.pytorch as te
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear for FP8")
 
 # ============================================================================
-# Step 4: Prepare dataset (following Unsloth pattern)
+# Step 4: Prepare dataset with FIXED padding
 # ============================================================================
 print("\n[4/5] Preparing dataset...")
 
@@ -76,53 +69,66 @@ alpaca_prompt = """Below is an instruction that describes a task, paired with an
 ### Response:
 {}"""
 
-EOS_TOKEN = tokenizer.eos_token
+tokenizer.pad_token = tokenizer.eos_token
 
-def formatting_prompts_func(examples):
-    instructions = examples["instruction"]
-    inputs = examples["input"]
-    outputs = examples["output"]
+def tokenize_fn(examples):
     texts = []
-    for instruction, input_text, output in zip(instructions, inputs, outputs):
-        text = alpaca_prompt.format(instruction, input_text, output) + EOS_TOKEN
-        texts.append(text)
-    return {"text": texts}
+    for inst, inp, out in zip(examples["instruction"], examples["input"], examples["output"]):
+        texts.append(alpaca_prompt.format(inst, inp, out) + tokenizer.eos_token)
+    # FIXED length padding - critical for FP8!
+    return tokenizer(texts, truncation=True, padding="max_length", max_length=max_seq_length)
 
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
-dataset = dataset.map(formatting_prompts_func, batched=True)
+dataset = dataset.map(tokenize_fn, batched=True, remove_columns=dataset.column_names)
+dataset.set_format("torch")
+
+# Simple collate that preserves fixed padding
+def collate_fn(batch):
+    return {
+        "input_ids": torch.stack([x["input_ids"] for x in batch]),
+        "attention_mask": torch.stack([x["attention_mask"] for x in batch]),
+    }
+
+# batch_size=8: 8 × 512 = 4096, divisible by 8 ✓
+dataloader = DataLoader(dataset, batch_size=8, shuffle=True, collate_fn=collate_fn)
 
 # ============================================================================
-# Step 5: Train with SFTTrainer (following Unsloth pattern)
+# Step 5: Training loop
 # ============================================================================
 print("\n[5/5] Starting FP8 training...")
+print(f"  Batch size: 8, Seq length: {max_seq_length}")
+print(f"  8 × {max_seq_length} = {8 * max_seq_length} (divisible by 8 ✓)")
 
-trainer = SFTTrainer(
-    model=model,
-    tokenizer=tokenizer,
-    train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=max_seq_length,
-    packing=False,
-    args=SFTConfig(
-        per_device_train_batch_size=16,  # Larger batch for FP8 GEMM compatibility
-        gradient_accumulation_steps=2,
-        gradient_checkpointing=False,   # Must be False for FP8!
-        warmup_steps=5,
-        max_steps=60,
-        learning_rate=2e-5,
-        logging_steps=10,
-        optim="adamw_torch",
-        weight_decay=0.01,
-        lr_scheduler_type="linear",
-        seed=3407,
-        output_dir="outputs",
-        report_to="none",
-        bf16=True,  # FP8 works WITH BF16 autocast
-    ),
-)
+model.train()
+total_loss = 0
+num_steps = 60
 
-# Train!
-trainer_stats = trainer.train()
+import time
+start_time = time.time()
+
+for step, batch in enumerate(dataloader):
+    if step >= num_steps:
+        break
+    
+    batch = {k: v.to(accelerator.device) for k, v in batch.items()}
+    
+    outputs = model(
+        input_ids=batch["input_ids"],
+        attention_mask=batch["attention_mask"],
+        labels=batch["input_ids"],
+    )
+    loss = outputs.loss
+    
+    accelerator.backward(loss)
+    optimizer.step()
+    optimizer.zero_grad()
+    
+    total_loss += loss.item()
+    
+    if (step + 1) % 10 == 0:
+        print(f"  Step {step + 1}/{num_steps}, Loss: {loss.item():.4f}")
+
+elapsed = time.time() - start_time
 
 # ============================================================================
 # Results
@@ -130,9 +136,9 @@ trainer_stats = trainer.train()
 print("\n" + "=" * 80)
 print("FP8 Training Complete!")
 print("=" * 80)
-print(f"Training time: {trainer_stats.metrics['train_runtime']:.1f}s")
-print(f"Samples/sec: {trainer_stats.metrics['train_samples_per_second']:.2f}")
-print(f"Final loss: {trainer_stats.metrics['train_loss']:.4f}")
+print(f"Training time: {elapsed:.1f}s")
+print(f"Steps: {num_steps}")
+print(f"Avg loss: {total_loss / num_steps:.4f}")
 
 used_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
 print(f"Peak memory: {used_memory} GB")
