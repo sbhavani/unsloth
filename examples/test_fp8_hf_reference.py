@@ -18,7 +18,11 @@ print("FP8 Test - Following HuggingFace Accelerate Reference")
 print("=" * 80)
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from accelerate import Accelerator
 from accelerate.utils.transformer_engine import convert_model
+
+# Initialize Accelerator (required by convert_model)
+_ = Accelerator()
 
 # ============================================================================
 # BASELINE: Raw TransformerEngine (no Accelerate)
