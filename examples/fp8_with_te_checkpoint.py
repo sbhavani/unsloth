@@ -4,7 +4,7 @@ FP8 Training with TE's native checkpoint function
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
-# os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Try with fused loss enabled
+os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Fused loss slower with FP8, disable it
 
 import torch
 import time
@@ -60,9 +60,15 @@ for module in model.modules():
     if isinstance(module, GradientCheckpointingLayer):
         module._gradient_checkpointing_func = te.distributed.checkpoint
 
-# Prepare with FP8
+# Prepare with FP8 - try 8-bit optimizer for memory savings
 print("\n[4/6] Preparing with FP8...")
-optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
+try:
+    import bitsandbytes as bnb
+    optimizer = bnb.optim.AdamW8bit(model.parameters(), lr=2e-5)
+    print("  Using 8-bit AdamW optimizer")
+except ImportError:
+    optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
+    print("  Using standard AdamW optimizer")
 model, optimizer = accelerator.prepare(model, optimizer)
 
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
