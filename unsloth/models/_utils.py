@@ -2539,20 +2539,3 @@ def convert_to_fp8(model, convert_lnorm=False):
     return model
 
 
-def apply_fp8_autocast(model, fp8_format="HYBRID", amax_history_len=32, amax_compute_algo="max"):
-    """
-    [DEPRECATED] This function is no longer needed.
-    
-    Use setup_fp8_mixed_precision_training() instead, which returns an Accelerator
-    that automatically handles FP8 autocast when you call accelerator.prepare().
-    
-    This function is kept for backwards compatibility but will be removed in a future version.
-    """
-    import warnings
-    warnings.warn(
-        "apply_fp8_autocast() is deprecated. Use setup_fp8_mixed_precision_training() instead, "
-        "which returns an Accelerator that handles FP8 autocast automatically.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
-    return model
