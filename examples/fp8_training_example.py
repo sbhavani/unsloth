@@ -57,6 +57,13 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
 # CRITICAL: Prepare model and optimizer TOGETHER for FP8!
 model, optimizer = accelerator.prepare(model, optimizer)
 
+# Disable gradient checkpointing (conflicts with FP8 prepared model)
+if hasattr(model, 'gradient_checkpointing_disable'):
+    model.gradient_checkpointing_disable()
+for module in model.modules():
+    if hasattr(module, 'gradient_checkpointing'):
+        module.gradient_checkpointing = False
+
 # Check conversion
 import transformer_engine.pytorch as te
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
@@ -90,6 +97,7 @@ trainer = SFTTrainer(
         output_dir="./fp8_output",
         per_device_train_batch_size=8,  # Larger batch = more FP8 benefit!
         gradient_accumulation_steps=2,
+        gradient_checkpointing=False,  # Must be False for FP8!
         num_train_epochs=1,
         max_steps=50,
         learning_rate=1e-5,
