@@ -27,16 +27,20 @@
 
 ## Recommended Tests (in order)
 
-### Test 1: Unsloth's Native FP8 (PRIORITY)
+### Test 1: Full Fine-Tuning (PRIORITY)
 ```bash
-python /workspace/unsloth/examples/test_fp8_load_in_fp8.py
+# Run BF16 baseline first
+python /workspace/unsloth/examples/llama_8b_full_finetune_bf16.py
+
+# Then run FP8 version
+python /workspace/unsloth/examples/llama_8b_full_finetune_fp8.py
 ```
 
-**Why:** This is the method used in unslothai/notebooks and may work better with Unsloth's optimizations.
+**Why:** Full fine-tuning (no LoRA) shows pure FP8 speedup without BF16 LoRA overhead.
 
-**Expected:** Should see better speedup than Accelerate method (~1.2-1.3x).
+**Expected:** 1.3-1.5x FP8 speedup vs BF16 baseline.
 
-### Test 2: Lower LoRA Rank
+### Test 2: Lower LoRA Rank (If you need LoRA)
 ```bash
 python /workspace/unsloth/examples/test_fp8_8b_low_lora.py
 ```
@@ -45,16 +49,7 @@ python /workspace/unsloth/examples/test_fp8_8b_low_lora.py
 
 **Expected:** Better speedup (~1.2x) as LoRA overhead is reduced.
 
-### Test 3: No LoRA (Pure FP8)
-```bash
-python /workspace/unsloth/examples/test_fp8_8b_no_lora.py
-```
-
-**Why:** Measure pure FP8 speedup without LoRA overhead.
-
-**Expected:** Maximum speedup (~1.3-1.5x) but uses more memory.
-
-### Test 4: Diagnostic
+### Test 3: Diagnostic
 ```bash
 python /workspace/unsloth/examples/diagnose_fp8.py
 ```
@@ -63,9 +58,43 @@ python /workspace/unsloth/examples/diagnose_fp8.py
 
 **Expected:** Identify if layers are being converted to Transformer Engine.
 
+## Important Discovery
+
+**`load_in_fp8=True` is NOT for FP8 compute training!**
+- It's for FP8 quantization/storage (used in GRPO/RL inference with vLLM)
+- unslothai/notebooks FP8 examples are all GRPO/RL, not supervised fine-tuning
+- For FP8 **compute** training, use `setup_fp8_mixed_precision_training()`
+
 ## Optimal Configurations for H100
 
-### Small Models (1B-3B)
+### Full Fine-Tuning (Best FP8 Speedup)
+```python
+# No LoRA - pure FP8 compute
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+
+setup_fp8_mixed_precision_training(backend="te")
+
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="unsloth/Meta-Llama-3.1-8B-Instruct",
+    max_seq_length=2048,
+    dtype=None,
+    load_in_4bit=False,
+)
+
+# NO get_peft_model() - train full model
+model = FastLanguageModel.for_training(model)
+
+TrainingArguments(
+    per_device_train_batch_size=2,  # Adjust for VRAM
+    gradient_accumulation_steps=8,
+    gradient_checkpointing=True,  # Important for memory
+    bf16=False,  # FP8 handles precision
+    fp16=False,
+)
+# Expected: 1.3-1.5x speedup vs BF16
+```
+
+### Small Models (1B-3B) with LoRA
 ```python
 # Good LoRA + FP8 balance
 model, tokenizer = FastLanguageModel.from_pretrained(
