@@ -2512,3 +2512,56 @@ def convert_to_fp8(model, convert_lnorm=False):
         )
     
     return model
+
+
+def apply_fp8_autocast(model, fp8_format="HYBRID", amax_history_len=32, amax_compute_algo="max"):
+    """
+    Apply FP8 autocast wrapper to model's forward method.
+    
+    This wraps the model's forward in te.fp8_autocast context, enabling
+    FP8 compute for te.Linear layers during forward/backward passes.
+    
+    Args:
+        model: Model with te.Linear layers (from convert_to_fp8)
+        fp8_format: "HYBRID" (E4M3 fwd, E5M2 bwd), "E4M3", or "E5M2"
+        amax_history_len: History length for scaling factor computation
+        amax_compute_algo: "max" or "most_recent"
+        
+    Returns:
+        model: Model with fp8_autocast wrapped forward
+    """
+    if not check_fp8_training_support():
+        raise RuntimeError("Unsloth: FP8 training not available.")
+    
+    import transformer_engine.pytorch as te
+    import transformer_engine.common.recipe as te_recipe
+    from accelerate.utils.transformer_engine import apply_fp8_autowrap
+    from accelerate.utils.dataclasses import FP8RecipeKwargs
+    
+    # Check if model has TE layers
+    has_te = any(isinstance(m, te.Linear) for m in model.modules())
+    if not has_te:
+        logger.warning(
+            "Unsloth: Model has no te.Linear layers! "
+            "Call convert_to_fp8(model) first."
+        )
+        return model
+    
+    # Create FP8 recipe kwargs
+    fp8_kwargs = FP8RecipeKwargs(
+        backend="TE",
+        fp8_format=fp8_format,
+        amax_history_len=amax_history_len,
+        amax_compute_algo=amax_compute_algo,
+    )
+    
+    # Apply autocast wrapper
+    model = apply_fp8_autowrap(model, fp8_kwargs)
+    
+    logger.info(
+        f"Unsloth: Applied FP8 autocast wrapper\n"
+        f"  Format: {fp8_format}\n"
+        f"  Amax history: {amax_history_len}"
+    )
+    
+    return model

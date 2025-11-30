@@ -10,7 +10,7 @@ This should show 1.3-1.5x speedup vs BF16 since there's no LoRA overhead.
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, convert_to_fp8
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, convert_to_fp8, apply_fp8_autocast
 import torch
 from datasets import load_dataset
 from transformers import TrainingArguments, DataCollatorForLanguageModeling
@@ -59,6 +59,10 @@ model = FastLanguageModel.for_training(model)  # Set to training mode
 # Convert to FP8 BEFORE creating Trainer (required for TE)
 print("\n[3.5/4] Converting model to FP8 (te.Linear layers)...")
 model = convert_to_fp8(model)
+
+# Apply FP8 autocast wrapper for FP8 compute during forward/backward
+print("\n[3.6/4] Applying FP8 autocast wrapper...")
+model = apply_fp8_autocast(model)
 
 # Count trainable parameters
 trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
