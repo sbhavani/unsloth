@@ -2333,6 +2333,34 @@ def check_fp8_training_support():
         return False
 
 
+def _patch_gradient_checkpointing_for_fp8():
+    """
+    Patch GradientCheckpointingLayer to handle missing _gradient_checkpointing_func.
+    
+    This fixes a compatibility issue where accelerator.prepare() + SFTTrainer
+    can leave layers in an inconsistent state (gradient_checkpointing=True but
+    _gradient_checkpointing_func not set).
+    """
+    try:
+        from transformers.modeling_layers import GradientCheckpointingLayer
+        
+        original_call = GradientCheckpointingLayer.__call__
+        
+        def patched_call(self, *args, **kwargs):
+            # If gradient_checkpointing is True but _gradient_checkpointing_func is missing,
+            # fall back to normal forward (this can happen with FP8 + SFTTrainer)
+            if self.gradient_checkpointing and self.training:
+                if not hasattr(self, '_gradient_checkpointing_func') or self._gradient_checkpointing_func is None:
+                    # Disable checkpointing for this layer and proceed normally
+                    self.gradient_checkpointing = False
+            return original_call(self, *args, **kwargs)
+        
+        GradientCheckpointingLayer.__call__ = patched_call
+        logger.info("Unsloth: Patched GradientCheckpointingLayer for FP8 compatibility")
+    except ImportError:
+        pass  # transformers version doesn't have this class
+
+
 def setup_fp8_mixed_precision_training(
     fp8_format = "HYBRID",
     amax_history_len = 32,
@@ -2429,6 +2457,9 @@ def setup_fp8_mixed_precision_training(
             "Install with: pip install transformer-engine\n"
             "Note: Requires CUDA 11.8+ and Hopper GPUs (H100/H200) for best performance."
         )
+
+    # Patch GradientCheckpointingLayer to handle FP8 + SFTTrainer compatibility
+    _patch_gradient_checkpointing_for_fp8()
 
     from accelerate import Accelerator
     
