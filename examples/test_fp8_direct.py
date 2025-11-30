@@ -14,23 +14,31 @@ import transformer_engine.pytorch as te
 import transformer_engine.common.recipe as te_recipe
 from transformer_engine.pytorch import fp8_autocast
 
-# Create a simple model with TE layers
-print("\n[1] Creating simple TE model...")
+# Create a simple model with TE layers - use LARGE dimensions like real LLMs
+print("\n[1] Creating simple TE model with LLM-scale dimensions...")
+# Llama 8B uses hidden_size=4096, intermediate_size=14336
+HIDDEN = 4096
+INTERMEDIATE = 14336
 
 class SimpleTEModel(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.linear1 = te.Linear(1024, 2048, bias=False)
-        self.linear2 = te.Linear(2048, 1024, bias=False)
+        # Simulate MLP: hidden -> intermediate -> hidden
+        self.gate_proj = te.Linear(HIDDEN, INTERMEDIATE, bias=False)
+        self.up_proj = te.Linear(HIDDEN, INTERMEDIATE, bias=False)
+        self.down_proj = te.Linear(INTERMEDIATE, HIDDEN, bias=False)
     
     def forward(self, x):
-        x = self.linear1(x)
-        x = torch.nn.functional.gelu(x)
-        x = self.linear2(x)
+        # SwiGLU-style MLP
+        gate = torch.nn.functional.silu(self.gate_proj(x))
+        up = self.up_proj(x)
+        x = gate * up
+        x = self.down_proj(x)
         return x
 
 model = SimpleTEModel().cuda().bfloat16()
 model.train()
+print(f"  Hidden: {HIDDEN}, Intermediate: {INTERMEDIATE}")
 
 # Create FP8 recipe
 print("\n[2] Creating FP8 recipe...")
@@ -43,7 +51,11 @@ print(f"  Recipe: {fp8_recipe}")
 
 # Test forward WITHOUT fp8_autocast
 print("\n[3] Forward WITHOUT fp8_autocast:")
-x = torch.randn(4, 128, 1024, device="cuda", dtype=torch.bfloat16)
+# Use realistic batch size and sequence length
+BATCH = 4
+SEQ_LEN = 512
+x = torch.randn(BATCH, SEQ_LEN, HIDDEN, device="cuda", dtype=torch.bfloat16)
+print(f"  Input shape: {x.shape} (batch={BATCH}, seq={SEQ_LEN}, hidden={HIDDEN})")
 with torch.no_grad():
     y = model(x)
 print(f"  Output shape: {y.shape}")
