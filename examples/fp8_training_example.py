@@ -10,14 +10,47 @@ Key differences from standard Unsloth:
 - Must use accelerator.prepare(model, optimizer) together
 - Gradient checkpointing must be disabled (conflicts with FP8)
 - Use larger batch sizes (FP8 benefits compute-bound workloads)
+- Sequences must be padded to multiples of 8 for FP8 tensor requirements
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
 import torch
+from torch.nn.utils.rnn import pad_sequence
 from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
+from transformers import DataCollatorForLanguageModeling
+
+
+class FP8DataCollator(DataCollatorForLanguageModeling):
+    """Data collator that pads to multiples of 8 for FP8 compatibility."""
+    
+    def __call__(self, features):
+        # First, use parent's collation
+        batch = super().__call__(features)
+        
+        # Pad sequence length to multiple of 8 for FP8
+        seq_len = batch["input_ids"].shape[1]
+        pad_to = ((seq_len + 7) // 8) * 8
+        
+        if pad_to > seq_len:
+            pad_size = pad_to - seq_len
+            # Pad input_ids with pad_token_id
+            batch["input_ids"] = torch.nn.functional.pad(
+                batch["input_ids"], (0, pad_size), value=self.tokenizer.pad_token_id
+            )
+            # Pad attention_mask with 0
+            batch["attention_mask"] = torch.nn.functional.pad(
+                batch["attention_mask"], (0, pad_size), value=0
+            )
+            # Pad labels with -100 (ignore index)
+            if "labels" in batch:
+                batch["labels"] = torch.nn.functional.pad(
+                    batch["labels"], (0, pad_size), value=-100
+                )
+        
+        return batch
 
 print("=" * 80)
 print("FP8 Training with Unsloth (Official Pattern)")
@@ -97,12 +130,20 @@ dataset = dataset.map(formatting_prompts_func, batched=True)
 # ============================================================================
 print("\n[5/5] Starting FP8 training...")
 
+# Ensure tokenizer has pad token
+if tokenizer.pad_token is None:
+    tokenizer.pad_token = tokenizer.eos_token
+
+# Use FP8-compatible data collator that pads to multiples of 8
+data_collator = FP8DataCollator(tokenizer=tokenizer, mlm=False)
+
 trainer = SFTTrainer(
     model=model,
     tokenizer=tokenizer,
     train_dataset=dataset,
     dataset_text_field="text",
     max_seq_length=max_seq_length,
+    data_collator=data_collator,
     packing=False,
     args=SFTConfig(
         per_device_train_batch_size=4,  # Larger batch = more FP8 benefit
