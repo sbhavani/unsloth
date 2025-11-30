@@ -68,7 +68,7 @@ model.gradient_checkpointing_disable()
 
 # Test inputs - LARGER batch to be compute-bound, not memory-bound
 # FP8 benefits compute-bound workloads
-BATCH_SIZE = 16  # Increased from 4
+BATCH_SIZE = 8   # Increased from 4 (16 OOMs)
 SEQ_LEN = 512    # Increased from 256
 print(f"\n  Using batch_size={BATCH_SIZE}, seq_len={SEQ_LEN}")
 input_ids = torch.randint(0, 32000, (BATCH_SIZE, SEQ_LEN), device="cuda")
