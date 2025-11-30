@@ -51,15 +51,21 @@ model = FastLanguageModel.for_training(model)
 # Step 3: Prepare with FP8 Accelerator
 # ============================================================================
 print("\n[3/5] Preparing model with FP8...")
+
+# CRITICAL: Disable gradient checkpointing BEFORE prepare (conflicts with FP8)
+model.gradient_checkpointing_disable()
+if hasattr(model, 'model'):
+    model.model.gradient_checkpointing = False
+for module in model.modules():
+    if hasattr(module, 'gradient_checkpointing'):
+        module.gradient_checkpointing = False
+    if hasattr(module, '_gradient_checkpointing_func'):
+        delattr(module, '_gradient_checkpointing_func')
+
 optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
 # CRITICAL: Prepare model and optimizer TOGETHER for FP8!
 model, optimizer = accelerator.prepare(model, optimizer)
-
-# Disable gradient checkpointing (conflicts with FP8)
-for module in model.modules():
-    if hasattr(module, 'gradient_checkpointing'):
-        module.gradient_checkpointing = False
 
 # Check TE conversion
 import transformer_engine.pytorch as te
