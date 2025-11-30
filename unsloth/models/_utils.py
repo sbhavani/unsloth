@@ -2439,7 +2439,7 @@ def setup_fp8_mixed_precision_training(
     )
 
 
-def convert_to_fp8(model):
+def convert_to_fp8(model, convert_lnorm=False):
     """
     Convert model's nn.Linear layers to Transformer Engine te.Linear for FP8 training.
     
@@ -2451,6 +2451,10 @@ def convert_to_fp8(model):
     
     Args:
         model: The PyTorch model to convert
+        convert_lnorm: Whether to also convert LayerNorm to te.LayerNorm.
+            Default False because:
+            - Accelerate devs found te.LayerNorm doesn't provide speedup
+            - Unsloth already uses fast Triton kernels for RMSNorm
         
     Returns:
         model: The converted model with te.Linear layers
@@ -2485,7 +2489,10 @@ def convert_to_fp8(model):
     # Convert model - this swaps nn.Linear with te.Linear
     # Must use no_grad() because conversion copies weights in-place
     with torch.no_grad():
-        convert_model(model, to_transformer_engine=True, _convert_linear=True, _convert_ln=False)
+        convert_model(model, to_transformer_engine=True, _convert_linear=True, _convert_ln=convert_lnorm)
+    
+    if convert_lnorm:
+        logger.info("Unsloth: Also converted LayerNorm to te.LayerNorm (experimental)")
     
     # Count TE layers after
     num_te_layers = sum(1 for m in model.modules() if isinstance(m, te.Linear))
