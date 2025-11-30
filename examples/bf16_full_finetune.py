@@ -34,9 +34,10 @@ tokenizer.pad_token = tokenizer.eos_token
 
 print(f"  Trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
 
-# Prepare optimizer
+# Prepare optimizer - use 8-bit to save ~48GB VRAM
 print("\n[2/4] Preparing optimizer...")
-optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
+import bitsandbytes as bnb
+optimizer = bnb.optim.AdamW8bit(model.parameters(), lr=2e-5)
 model = model.cuda()
 
 # Prepare dataset
