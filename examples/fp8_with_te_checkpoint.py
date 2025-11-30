@@ -4,7 +4,7 @@ FP8 Training with TE's native checkpoint function
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
-os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
+# os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Try with fused loss enabled
 
 import torch
 import time
