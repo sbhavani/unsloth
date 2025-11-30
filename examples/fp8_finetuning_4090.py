@@ -126,8 +126,8 @@ def main():
             warmup_steps=5,
             num_train_epochs=NUM_TRAIN_EPOCHS,
             learning_rate=LEARNING_RATE,
-            fp16=False,
-            bf16=False,
+        fp16=False,
+        bf16=True,  # FP8 works WITH BF16 autocast!
             logging_steps=10,
             optim="adamw_8bit",
             weight_decay=0.01,

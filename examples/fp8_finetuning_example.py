@@ -166,7 +166,7 @@ def main():
         num_train_epochs=NUM_TRAIN_EPOCHS,
         learning_rate=LEARNING_RATE,
         fp16=False,
-        bf16=False,  # FP8 handles mixed precision
+        bf16=True,  # FP8 works WITH BF16 autocast!  # FP8 handles mixed precision
         logging_steps=LOGGING_STEPS,
         optim="adamw_8bit",
         weight_decay=0.01,

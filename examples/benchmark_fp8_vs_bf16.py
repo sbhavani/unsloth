@@ -204,8 +204,8 @@ def run_benchmark(mode="bf16", num_steps=NUM_TRAIN_STEPS):
         warmup_steps=5,
         max_steps=num_steps,
         learning_rate=LEARNING_RATE,
-        fp16=False if mode == "fp8" else False,
-        bf16=False if mode == "fp8" else True,  # Use BF16 for baseline
+        fp16=False,
+        bf16=True,  # ALWAYS use BF16 - FP8 works WITH BF16 autocast, not instead of it!
         logging_steps=10,
         optim="adamw_8bit",
         weight_decay=0.01,

@@ -94,8 +94,8 @@ trainer = SFTTrainer(
     args=TrainingArguments(
         per_device_train_batch_size=4,    # Must be >=4 for FP8 (batch_size * seq_len divisible by 8)
         max_steps=10,
-        fp16=False,                       # Disabled for FP8
-        bf16=False,                       # Disabled for FP8
+        fp16=False,
+        bf16=True,  # FP8 works WITH BF16 autocast!
         logging_steps=5,
         output_dir="outputs/test_fp8",
         report_to="none",

@@ -6,10 +6,35 @@ This guide explains how to use FP8 (8-bit floating point) mixed precision traini
 
 FP8 mixed precision training provides several benefits:
 
-- **Reduced Memory Usage**: FP8 uses 8 bits instead of 16 (BF16/FP16) or 32 (FP32), reducing memory consumption by ~40%
-- **Faster Training**: Optimized FP8 operations on supported hardware (up to 1.5x faster on H100)
+- **Faster Training**: Optimized FP8 GEMM operations on H100/H200 (up to 1.5x faster)
 - **Maintained Accuracy**: Careful scaling techniques minimize accuracy degradation (~99% maintained)
-- **Larger Batch Sizes**: Lower memory usage allows for larger batch sizes
+
+**Important Notes:**
+- FP8 uses **MORE memory** than BF16 (not less!) due to storing scaling factors and FP8 copies
+- FP8 is for **speed**, not memory savings
+- Best results on H100/H200 with large models (7B+)
+
+## FP8 + BF16 Autocast (CRITICAL!)
+
+**FP8 works WITH BF16, not instead of it!**
+
+Transformer Engine FP8 uses:
+- **FP8** for GEMM operations (Linear layer matrix multiplications)  
+- **BF16** for everything else (activations, layernorm, softmax, etc.)
+
+```python
+# ✅ CORRECT - Always use bf16=True with FP8
+TrainingArguments(
+    fp16=False,
+    bf16=True,   # Enable BF16 autocast!
+)
+
+# ❌ WRONG - This causes FP8 to be SLOWER than BF16!
+TrainingArguments(
+    fp16=False,
+    bf16=False,  # Don't do this - causes FP32↔FP8 overhead
+)
+```
 
 ## What is Transformer Engine?
 
@@ -84,7 +109,7 @@ training_args = TrainingArguments(
     num_train_epochs=1,
     learning_rate=2e-4,
     fp16=False,
-    bf16=False,  # FP8 handles precision
+    bf16=True,  # IMPORTANT: FP8 works WITH BF16 autocast!
     output_dir="outputs",
 )
 

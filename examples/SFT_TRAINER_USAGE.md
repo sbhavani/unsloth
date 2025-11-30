@@ -26,6 +26,38 @@ The benefits of FP8 are:
 - When memory is the primary bottleneck
 - A100 or older GPUs (use BF16 instead)
 
+## FP8 + BF16 Autocast (CRITICAL!)
+
+**FP8 works WITH BF16, not instead of it!**
+
+Transformer Engine FP8 uses:
+- **FP8** for GEMM operations (Linear layer matrix multiplications)
+- **BF16** for everything else (activations, layernorm, softmax, etc.)
+
+```python
+# ✅ CORRECT - FP8 + BF16 together
+TrainingArguments(
+    fp16=False,
+    bf16=True,   # Enable BF16 autocast!
+)
+
+# ❌ WRONG - This disables BF16 autocast, causing FP32↔FP8 overhead
+TrainingArguments(
+    fp16=False,
+    bf16=False,  # Don't do this!
+)
+```
+
+When `bf16=False`:
+- Non-GEMM operations run in FP32
+- Constant conversions between FP32 and FP8
+- **This causes FP8 to be SLOWER than pure BF16!**
+
+When `bf16=True`:
+- Non-GEMM operations run in BF16
+- Minimal conversion overhead (BF16↔FP8)
+- **This gives the expected FP8 speedup!**
+
 ## Key API Changes in TRL >= 0.18
 
 The TRL library has undergone significant API changes. Here's what changed:
@@ -115,8 +147,8 @@ trainer = SFTTrainer(
         gradient_accumulation_steps=4,
         num_train_epochs=1,
         learning_rate=2e-4,
-        fp16=False,                   # Must be False for FP8
-        bf16=False,                   # Must be False for FP8
+        fp16=False,
+        bf16=True,                    # FP8 works WITH BF16 autocast!
         logging_steps=10,
         output_dir="outputs",
         report_to="none",
@@ -213,8 +245,8 @@ TrainingArguments(
     per_device_train_batch_size=4,      # IMPORTANT: Must be >=4 for FP8
                                         # FP8 requires (batch_size * seq_len) divisible by 8
     gradient_accumulation_steps=4,      # Effective batch size = 4 * 4 = 16
-    fp16=False,                         # Must disable for FP8
-    bf16=False,                         # Must disable for FP8
+    fp16=False,                         # Must disable FP16
+    bf16=True,                          # IMPORTANT: FP8 works WITH BF16 autocast!
     dataloader_num_workers=0,           # Must be 0 (no multiprocessing)
     # ... other args
 )
