@@ -2437,3 +2437,69 @@ def setup_fp8_mixed_precision_training(
         f"  Amax algo: {amax_compute_algo}\n"
         f"  Note: Optimal on H100/H200 GPUs"
     )
+
+
+def convert_to_fp8(model):
+    """
+    Convert model's nn.Linear layers to Transformer Engine te.Linear for FP8 training.
+    
+    IMPORTANT: Call this AFTER loading the model but BEFORE creating the Trainer.
+    
+    This is necessary because HuggingFace Trainer prepares model and optimizer
+    separately, but Accelerate's TE integration requires them together.
+    By converting manually, we bypass this limitation.
+    
+    Args:
+        model: The PyTorch model to convert
+        
+    Returns:
+        model: The converted model with te.Linear layers
+        
+    Example:
+        >>> from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, convert_to_fp8
+        >>> 
+        >>> setup_fp8_mixed_precision_training()
+        >>> model, tokenizer = FastLanguageModel.from_pretrained(...)
+        >>> model = FastLanguageModel.for_training(model)
+        >>> model = convert_to_fp8(model)  # Convert BEFORE creating Trainer!
+        >>> trainer = SFTTrainer(model=model, ...)
+    """
+    if not check_fp8_training_support():
+        raise RuntimeError(
+            "Unsloth: FP8 training not available. Need transformer-engine and accelerate."
+        )
+    
+    import transformer_engine.pytorch as te
+    from accelerate.utils.transformer_engine import convert_model, has_transformer_engine_layers
+    
+    # Check if already converted
+    if has_transformer_engine_layers(model):
+        logger.info("Unsloth: Model already has TE layers, skipping conversion")
+        return model
+    
+    # Count layers before
+    num_linear_before = sum(1 for m in model.modules() if isinstance(m, torch.nn.Linear))
+    
+    logger.info(f"Unsloth: Converting {num_linear_before} nn.Linear layers to te.Linear for FP8...")
+    
+    # Convert model - this swaps nn.Linear with te.Linear
+    convert_model(model, to_transformer_engine=True, _convert_linear=True, _convert_ln=False)
+    
+    # Count TE layers after
+    num_te_layers = sum(1 for m in model.modules() if isinstance(m, te.Linear))
+    num_linear_after = sum(1 for m in model.modules() if isinstance(m, torch.nn.Linear))
+    
+    if num_te_layers == 0:
+        logger.warning(
+            "Unsloth: No layers were converted to FP8! "
+            "This may be because layer dimensions are not divisible by 16."
+        )
+    else:
+        logger.info(
+            f"Unsloth: FP8 conversion complete!\n"
+            f"  Converted: {num_te_layers} te.Linear layers\n"
+            f"  Remaining: {num_linear_after} nn.Linear layers\n"
+            f"  (Layers with dims not divisible by 16 are skipped)"
+        )
+    
+    return model

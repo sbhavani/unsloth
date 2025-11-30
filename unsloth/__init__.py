@@ -260,6 +260,7 @@ from unsloth_zoo.rl_environments import (
 from .models._utils import (
     setup_fp8_mixed_precision_training,
     check_fp8_training_support,
+    convert_to_fp8,
 )
 
 # Patch TRL trainers for backwards compatibility

@@ -15,7 +15,7 @@ for var in ["ACCELERATE_MIXED_PRECISION", "ACCELERATE_FP8_BACKEND", "ACCELERATE_
     print(f"  {var}: {os.environ.get(var, 'NOT SET')}")
 
 # Setup FP8
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, convert_to_fp8
 setup_fp8_mixed_precision_training(backend="te")
 
 print("\n[2] After setup_fp8_mixed_precision_training():")
@@ -72,12 +72,12 @@ for name, module in model.named_modules():
 print(f"  te.Linear: {te_count}")
 print(f"  nn.Linear: {linear_count}")
 
-# Prepare with accelerator
-print("\n[7] Running accelerator.prepare(model)...")
-model = acc.prepare(model)
+# Convert to FP8 using convert_to_fp8 (bypasses accelerator.prepare limitation)
+print("\n[7] Running convert_to_fp8(model)...")
+model = convert_to_fp8(model)
 
 # Count again
-print("\n[8] Layer Types AFTER accelerator.prepare():")
+print("\n[8] Layer Types AFTER convert_to_fp8():")
 te_count = 0
 linear_count = 0
 for name, module in model.named_modules():
