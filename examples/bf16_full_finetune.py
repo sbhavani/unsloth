@@ -12,8 +12,10 @@ from unsloth import FastLanguageModel
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 
+BATCH_SIZE = 16  # Increased from 8 - we have memory headroom
+
 print("=" * 80)
-print("BF16 Full Fine-tuning (batch=8, seq=512, WITH grad ckpt)")
+print(f"BF16 Full Fine-tuning (batch={BATCH_SIZE}, seq=512, WITH grad ckpt)")
 print("=" * 80)
 
 # Load model - full fine-tuning (no LoRA)
@@ -68,7 +70,7 @@ def collate(batch):
         "attention_mask": torch.stack([x["attention_mask"] for x in batch]),
     }
 
-dataloader = DataLoader(dataset, batch_size=8, shuffle=True, collate_fn=collate)
+dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate)
 
 # Training
 print("\n[4/4] Starting training...")
@@ -106,6 +108,6 @@ print("\n" + "=" * 80)
 print("BF16 Full Fine-tuning Complete!")
 print("=" * 80)
 print(f"Time: {elapsed:.1f}s")
-print(f"Samples/sec: {num_steps * 8 / elapsed:.2f}")
+print(f"Samples/sec: {num_steps * BATCH_SIZE / elapsed:.2f}")
 print(f"Avg loss: {total_loss / num_steps:.4f}")
 print(f"Peak memory: {torch.cuda.max_memory_reserved() / 1e9:.2f} GB")
