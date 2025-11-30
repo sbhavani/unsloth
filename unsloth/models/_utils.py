@@ -2483,7 +2483,9 @@ def convert_to_fp8(model):
     logger.info(f"Unsloth: Converting {num_linear_before} nn.Linear layers to te.Linear for FP8...")
     
     # Convert model - this swaps nn.Linear with te.Linear
-    convert_model(model, to_transformer_engine=True, _convert_linear=True, _convert_ln=False)
+    # Must use no_grad() because conversion copies weights in-place
+    with torch.no_grad():
+        convert_model(model, to_transformer_engine=True, _convert_linear=True, _convert_ln=False)
     
     # Count TE layers after
     num_te_layers = sum(1 for m in model.modules() if isinstance(m, te.Linear))
