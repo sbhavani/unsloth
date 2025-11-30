@@ -261,6 +261,7 @@ from .models._utils import (
     setup_fp8_mixed_precision_training,
     check_fp8_training_support,
     convert_to_fp8,
+    FP8DataCollator,
 )
 
 # Patch TRL trainers for backwards compatibility

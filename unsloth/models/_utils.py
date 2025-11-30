@@ -2498,6 +2498,75 @@ def setup_fp8_mixed_precision_training(
     return accelerator
 
 
+class FP8DataCollator:
+    """
+    Data collator that pads sequences to multiples of 8 for FP8 compatibility.
+    
+    FP8 execution requires:
+    - batch_size × seq_len divisible by 8
+    - hidden_dim divisible by 16
+    
+    This collator wraps any existing collator and ensures the sequence length
+    is padded to the nearest multiple of 8.
+    
+    Args:
+        tokenizer: The tokenizer (must have pad_token_id set)
+        mlm: Whether to use masked language modeling (default False)
+        base_collator: Optional base collator to wrap. If not provided,
+            uses DataCollatorForLanguageModeling.
+    
+    Example:
+        from unsloth import FP8DataCollator
+        
+        collator = FP8DataCollator(tokenizer=tokenizer, mlm=False)
+        trainer = SFTTrainer(
+            model=model,
+            data_collator=collator,
+            ...
+        )
+    """
+    
+    def __init__(self, tokenizer, mlm=False, base_collator=None):
+        self.tokenizer = tokenizer
+        if base_collator is not None:
+            self.base_collator = base_collator
+        else:
+            from transformers import DataCollatorForLanguageModeling
+            self.base_collator = DataCollatorForLanguageModeling(
+                tokenizer=tokenizer, mlm=mlm
+            )
+    
+    def __call__(self, features):
+        # First, use base collator
+        batch = self.base_collator(features)
+        
+        # Pad sequence length to multiple of 8 for FP8
+        if "input_ids" in batch:
+            seq_len = batch["input_ids"].shape[1]
+            pad_to = ((seq_len + 7) // 8) * 8
+            
+            if pad_to > seq_len:
+                pad_size = pad_to - seq_len
+                pad_token_id = self.tokenizer.pad_token_id or 0
+                
+                # Pad input_ids with pad_token_id
+                batch["input_ids"] = torch.nn.functional.pad(
+                    batch["input_ids"], (0, pad_size), value=pad_token_id
+                )
+                # Pad attention_mask with 0
+                if "attention_mask" in batch:
+                    batch["attention_mask"] = torch.nn.functional.pad(
+                        batch["attention_mask"], (0, pad_size), value=0
+                    )
+                # Pad labels with -100 (ignore index)
+                if "labels" in batch:
+                    batch["labels"] = torch.nn.functional.pad(
+                        batch["labels"], (0, pad_size), value=-100
+                    )
+        
+        return batch
+
+
 def convert_to_fp8(model, convert_lnorm=False):
     """
     [ADVANCED] Manually convert model's nn.Linear layers to te.Linear for FP8.

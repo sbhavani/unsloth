@@ -16,41 +16,9 @@ import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
 import torch
-from torch.nn.utils.rnn import pad_sequence
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, FP8DataCollator
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
-from transformers import DataCollatorForLanguageModeling
-
-
-class FP8DataCollator(DataCollatorForLanguageModeling):
-    """Data collator that pads to multiples of 8 for FP8 compatibility."""
-    
-    def __call__(self, features):
-        # First, use parent's collation
-        batch = super().__call__(features)
-        
-        # Pad sequence length to multiple of 8 for FP8
-        seq_len = batch["input_ids"].shape[1]
-        pad_to = ((seq_len + 7) // 8) * 8
-        
-        if pad_to > seq_len:
-            pad_size = pad_to - seq_len
-            # Pad input_ids with pad_token_id
-            batch["input_ids"] = torch.nn.functional.pad(
-                batch["input_ids"], (0, pad_size), value=self.tokenizer.pad_token_id
-            )
-            # Pad attention_mask with 0
-            batch["attention_mask"] = torch.nn.functional.pad(
-                batch["attention_mask"], (0, pad_size), value=0
-            )
-            # Pad labels with -100 (ignore index)
-            if "labels" in batch:
-                batch["labels"] = torch.nn.functional.pad(
-                    batch["labels"], (0, pad_size), value=-100
-                )
-        
-        return batch
 
 print("=" * 80)
 print("FP8 Training with Unsloth (Official Pattern)")
