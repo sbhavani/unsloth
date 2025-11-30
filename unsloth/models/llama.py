@@ -3406,6 +3406,9 @@ class FastLlamaModel:
             model.gradient_checkpointing_enable(
                 gradient_checkpointing_kwargs={"use_reentrant": False}
             )
+            # Also apply Unsloth's smart gradient checkpointing for memory savings
+            dtype = model.get_input_embeddings().weight.dtype
+            patch_unsloth_smart_gradient_checkpointing(dtype=dtype)
 
         # Also re-enable training for embeddings for NEFTune
         if hasattr(model, "get_input_embeddings"):

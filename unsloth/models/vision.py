@@ -52,6 +52,7 @@ from unsloth_zoo.hf_utils import (
 )
 from unsloth_zoo.patching_utils import patch_model_and_tokenizer
 from unsloth_zoo.training_utils import prepare_model_for_training
+from unsloth_zoo.gradient_checkpointing import patch_unsloth_smart_gradient_checkpointing
 
 from unsloth_zoo.utils import Version
 from transformers import __version__ as transformers_version
@@ -1229,6 +1230,9 @@ class FastBaseModel:
             model.gradient_checkpointing_enable(
                 gradient_checkpointing_kwargs={"use_reentrant": False}
             )
+            # Also apply Unsloth's smart gradient checkpointing for memory savings
+            dtype = model.get_input_embeddings().weight.dtype
+            patch_unsloth_smart_gradient_checkpointing(dtype=dtype)
 
         # Also re-enable training for embeddings for NEFTune
         if hasattr(model, "get_input_embeddings"):
