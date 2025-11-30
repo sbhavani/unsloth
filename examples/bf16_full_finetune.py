@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 BF16 Full Fine-tuning - Fair comparison with FP8 full fine-tuning
-Same settings: batch=8, seq=512, gradient checkpointing, full params
+Same settings: batch=8, seq=512, NO gradient checkpointing, full params
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
@@ -9,28 +9,12 @@ os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Same as FP8
 
 import torch
 import time
-from functools import partial
 from unsloth import FastLanguageModel
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 
-# Fix gradient checkpointing for full fine-tuning
-from transformers.modeling_layers import GradientCheckpointingLayer
-
-def patched_gc_call(self, *args, **kwargs):
-    if self.gradient_checkpointing and self.training:
-        # Use torch's checkpoint with use_reentrant=False
-        return torch.utils.checkpoint.checkpoint(
-            partial(torch.nn.Module.__call__, self, **kwargs),
-            *args,
-            use_reentrant=False,
-        )
-    return torch.nn.Module.__call__(self, *args, **kwargs)
-
-GradientCheckpointingLayer.__call__ = patched_gc_call
-
 print("=" * 80)
-print("BF16 Full Fine-tuning (batch=8, seq=512, grad ckpt)")
+print("BF16 Full Fine-tuning (batch=8, seq=512, NO grad ckpt)")
 print("=" * 80)
 
 # Load model - full fine-tuning (no LoRA)
@@ -44,8 +28,8 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     load_in_4bit=False,
 )
 
-# Full fine-tuning with gradient checkpointing
-model = FastLanguageModel.for_training(model, use_gradient_checkpointing=True)
+# Full fine-tuning WITHOUT gradient checkpointing (can't get it working with Unsloth patches)
+model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 tokenizer.pad_token = tokenizer.eos_token
 
 print(f"  Trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
