@@ -1,35 +1,38 @@
 #!/usr/bin/env python3
 """
-Test FP8 directly without Unsloth to verify TE works.
+Direct FP8 test using TE layers without any HuggingFace or Unsloth code.
+Tests BOTH torch.amp (BF16) + fp8_autocast together.
+Uses LLM-scale dimensions (4096 hidden, 14336 intermediate).
 """
-import os
-os.environ["HF_DATASETS_NUM_PROC"] = "1"
-
 import torch
-print("=" * 80)
-print("Direct FP8 Test (without Unsloth wrappers)")
-print("=" * 80)
-
+import time
 import transformer_engine.pytorch as te
 import transformer_engine.common.recipe as te_recipe
 from transformer_engine.pytorch import fp8_autocast
 
-# Create a simple model with TE layers - use LARGE dimensions like real LLMs
-print("\n[1] Creating simple TE model with LLM-scale dimensions...")
-# Llama 8B uses hidden_size=4096, intermediate_size=14336
+print("=" * 80)
+print("Direct FP8 Test - BF16 + FP8 Autocast (LLM-scale)")
+print("=" * 80)
+
+# LLM-scale dimensions (same as Llama 8B)
 HIDDEN = 4096
 INTERMEDIATE = 14336
+BATCH = 4
+SEQ_LEN = 512
+
+print(f"\n[1] Creating TE model with LLM-scale dimensions...")
+print(f"  Hidden: {HIDDEN}, Intermediate: {INTERMEDIATE}")
+print(f"  Input shape: ({BATCH}, {SEQ_LEN}, {HIDDEN})")
 
 class SimpleTEModel(torch.nn.Module):
+    """Simple MLP mimicking LLM FFN block"""
     def __init__(self):
         super().__init__()
-        # Simulate MLP: hidden -> intermediate -> hidden
         self.gate_proj = te.Linear(HIDDEN, INTERMEDIATE, bias=False)
         self.up_proj = te.Linear(HIDDEN, INTERMEDIATE, bias=False)
         self.down_proj = te.Linear(INTERMEDIATE, HIDDEN, bias=False)
     
     def forward(self, x):
-        # SwiGLU-style MLP
         gate = torch.nn.functional.silu(self.gate_proj(x))
         up = self.up_proj(x)
         x = gate * up
@@ -37,10 +40,7 @@ class SimpleTEModel(torch.nn.Module):
         return x
 
 model = SimpleTEModel().cuda().bfloat16()
-model.train()
-print(f"  Hidden: {HIDDEN}, Intermediate: {INTERMEDIATE}")
 
-# Create FP8 recipe
 print("\n[2] Creating FP8 recipe...")
 fp8_recipe = te_recipe.DelayedScaling(
     fp8_format=te_recipe.Format.HYBRID,
@@ -49,76 +49,59 @@ fp8_recipe = te_recipe.DelayedScaling(
 )
 print(f"  Recipe: {fp8_recipe}")
 
-# Test forward WITHOUT fp8_autocast
-print("\n[3] Forward WITHOUT fp8_autocast:")
-# Use realistic batch size and sequence length
-BATCH = 4
-SEQ_LEN = 512
-x = torch.randn(BATCH, SEQ_LEN, HIDDEN, device="cuda", dtype=torch.bfloat16)
-print(f"  Input shape: {x.shape} (batch={BATCH}, seq={SEQ_LEN}, hidden={HIDDEN})")
-with torch.no_grad():
-    y = model(x)
-print(f"  Output shape: {y.shape}")
+# Create input
+x = torch.randn(BATCH, SEQ_LEN, HIDDEN, dtype=torch.bfloat16, device="cuda")
 
-# Test forward WITH fp8_autocast
-print("\n[4] Forward WITH fp8_autocast:")
+# Warmup with both autocasts
+print("\n[3] Warmup...")
 with torch.no_grad():
-    with fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-        y = model(x)
-print(f"  Output shape: {y.shape}")
-
-# Check memory difference
-print("\n[5] Memory comparison:")
-torch.cuda.reset_peak_memory_stats()
-
-# BF16 forward
-with torch.no_grad():
-    for _ in range(10):
-        y = model(x)
+    with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
+            for _ in range(10):
+                _ = model(x)
 torch.cuda.synchronize()
-bf16_mem = torch.cuda.max_memory_allocated() / 1e6
-print(f"  BF16 peak memory: {bf16_mem:.1f} MB")
 
+# Benchmark BF16 ONLY
+print("\n[4] Benchmark BF16 ONLY:")
 torch.cuda.reset_peak_memory_stats()
-
-# FP8 forward
-with torch.no_grad():
-    with fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-        for _ in range(10):
-            y = model(x)
-torch.cuda.synchronize()
-fp8_mem = torch.cuda.max_memory_allocated() / 1e6
-print(f"  FP8 peak memory: {fp8_mem:.1f} MB")
-
-# Speed comparison
-import time
-
-print("\n[6] Speed comparison:")
-
-# BF16 speed
 torch.cuda.synchronize()
 start = time.perf_counter()
 with torch.no_grad():
-    for _ in range(100):
-        y = model(x)
-torch.cuda.synchronize()
-bf16_time = time.perf_counter() - start
-print(f"  BF16: {bf16_time*1000:.2f} ms for 100 iters")
-
-# FP8 speed
-torch.cuda.synchronize()
-start = time.perf_counter()
-with torch.no_grad():
-    with fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
+    with torch.amp.autocast('cuda', dtype=torch.bfloat16):
         for _ in range(100):
-            y = model(x)
+            _ = model(x)
 torch.cuda.synchronize()
-fp8_time = time.perf_counter() - start
-print(f"  FP8: {fp8_time*1000:.2f} ms for 100 iters")
+bf16_time = (time.perf_counter() - start) * 1000
+bf16_mem = torch.cuda.max_memory_allocated() / 1e6
+print(f"  Time: {bf16_time:.2f} ms for 100 iters")
+print(f"  Memory: {bf16_mem:.1f} MB")
 
+# Benchmark BF16 + FP8
+print("\n[5] Benchmark BF16 + FP8 autocast:")
+torch.cuda.reset_peak_memory_stats()
+torch.cuda.synchronize()
+start = time.perf_counter()
+with torch.no_grad():
+    with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
+            for _ in range(100):
+                _ = model(x)
+torch.cuda.synchronize()
+fp8_time = (time.perf_counter() - start) * 1000
+fp8_mem = torch.cuda.max_memory_allocated() / 1e6
+print(f"  Time: {fp8_time:.2f} ms for 100 iters")
+print(f"  Memory: {fp8_mem:.1f} MB")
+
+# Results
+print("\n" + "=" * 80)
+print("RESULTS (Direct TE - BF16 vs BF16+FP8)")
+print("=" * 80)
 speedup = bf16_time / fp8_time
-print(f"\n  Speedup: {speedup:.2f}x")
+print(f"BF16 only:  {bf16_time:.2f} ms, {bf16_mem:.1f} MB")
+print(f"BF16 + FP8: {fp8_time:.2f} ms, {fp8_mem:.1f} MB")
+print(f"Speedup: {speedup:.2f}x")
+
 if speedup > 1.1:
-    print("  ✅ FP8 IS faster on this hardware!")
+    print("\n✅ FP8 IS faster with BF16+FP8 setup!")
 else:
-    print("  ⚠️  FP8 not showing expected speedup")
+    print("\n⚠️  FP8 not showing expected speedup")
