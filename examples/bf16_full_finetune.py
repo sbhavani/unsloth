@@ -25,10 +25,11 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
+    full_finetuning=True,  # Proper way to enable full fine-tuning with gradient checkpointing
 )
 
-# Full fine-tuning WITH gradient checkpointing (fixed in for_training())
-model = FastLanguageModel.for_training(model, use_gradient_checkpointing=True)
+# for_training() just sets training mode flags
+model = FastLanguageModel.for_training(model)
 tokenizer.pad_token = tokenizer.eos_token
 
 print(f"  Trainable params: {sum(p.numel() for p in model.parameters() if p.requires_grad):,}")
