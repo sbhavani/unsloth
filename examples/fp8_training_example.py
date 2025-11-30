@@ -43,24 +43,14 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     load_in_4bit=False,  # FP8 works best with full precision, not 4bit
 )
 
-# For FP8: Use for_training() instead of get_peft_model()
-# FP8 benefits most from full fine-tuning, not LoRA
-model = FastLanguageModel.for_training(model)
+# For FP8: Use for_training() with gradient_checkpointing=False
+# FP8 conflicts with gradient checkpointing
+model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 
 # ============================================================================
 # Step 3: Prepare with FP8 Accelerator
 # ============================================================================
 print("\n[3/5] Preparing model with FP8...")
-
-# CRITICAL: Disable gradient checkpointing BEFORE prepare (conflicts with FP8)
-model.gradient_checkpointing_disable()
-if hasattr(model, 'model'):
-    model.model.gradient_checkpointing = False
-for module in model.modules():
-    if hasattr(module, 'gradient_checkpointing'):
-        module.gradient_checkpointing = False
-    if hasattr(module, '_gradient_checkpointing_func'):
-        delattr(module, '_gradient_checkpointing_func')
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 
