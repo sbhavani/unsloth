@@ -2334,7 +2334,6 @@ def check_fp8_training_support():
 
 
 def setup_fp8_mixed_precision_training(
-    backend = "te",
     fp8_format = "HYBRID",
     amax_history_len = 32,
     amax_compute_algo = "max",
@@ -2342,17 +2341,16 @@ def setup_fp8_mixed_precision_training(
     """
     Setup FP8 mixed precision training using NVIDIA Transformer Engine.
 
-    This configures HuggingFace Accelerate to use FP8 mixed precision training
-    with NVIDIA Transformer Engine. Call this before creating your Trainer.
+    Returns an Accelerator configured for FP8 training. Use this Accelerator
+    to prepare your model and optimizer BEFORE creating the Trainer.
 
     FP8 mixed precision training provides:
-    - ~40% memory reduction vs BF16/FP16
-    - ~1.3-1.5x faster training on H100 GPUs
+    - ~1.3-1.6x faster training on H100 GPUs
+    - Works best with larger batch sizes (compute-bound workloads)
+    - Uses ~10-30% more memory than BF16 (for FP8 scaling factors)
     - Minimal accuracy degradation (~99% maintained)
 
     Args:
-        backend (str): FP8 backend. Default: "te" (Transformer Engine).
-            Matches Accelerate's FP8RecipeKwargs convention.
         fp8_format (str): FP8 format to use. Options:
             - "HYBRID": E4M3 for forward, E5M2 for backward (recommended)
             - "E4M3": 4-bit exponent, 3-bit mantissa (higher precision)
@@ -2363,32 +2361,51 @@ def setup_fp8_mixed_precision_training(
             - "max": Use maximum from history (recommended for stability)
             - "most_recent": Use most recent value (faster adaptation)
 
+    Returns:
+        accelerator: Configured Accelerator for FP8 training
+
     Example:
         >>> from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+        >>> import torch
         >>>
-        >>> # Enable FP8 training with Transformer Engine
-        >>> setup_fp8_mixed_precision_training()
+        >>> # Get FP8-configured Accelerator
+        >>> accelerator = setup_fp8_mixed_precision_training()
         >>>
-        >>> # Load model normally
+        >>> # Load model with Unsloth (don't move to CUDA manually!)
         >>> model, tokenizer = FastLanguageModel.from_pretrained(
-        ...     model_name="unsloth/Llama-3.2-1B-Instruct",
+        ...     model_name="unsloth/Meta-Llama-3.1-8B-Instruct",
         ...     max_seq_length=2048,
+        ...     dtype=torch.bfloat16,
+        ...     load_in_4bit=False,  # FP8 works best without quantization
         ... )
         >>>
-        >>> # Add LoRA (optional - combine FP8 + LoRA for max efficiency)
-        >>> model = FastLanguageModel.get_peft_model(model, r=16, ...)
+        >>> # Enable training mode
+        >>> model = FastLanguageModel.for_training(model)
         >>>
-        >>> # Train with standard trainer - FP8 will be used automatically
-        >>> trainer = SFTTrainer(model=model, ...)
+        >>> # Create optimizer BEFORE prepare
+        >>> optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5)
+        >>>
+        >>> # Prepare model and optimizer together (CRITICAL for FP8!)
+        >>> model, optimizer = accelerator.prepare(model, optimizer)
+        >>>
+        >>> # Now create Trainer with prepared model
+        >>> trainer = SFTTrainer(
+        ...     model=model,
+        ...     args=TrainingArguments(
+        ...         bf16=True,  # Keep bf16=True! FP8 works WITH BF16 autocast
+        ...         per_device_train_batch_size=8,  # Larger batch = more FP8 benefit
+        ...         ...
+        ...     ),
+        ...     ...
+        ... )
         >>> trainer.train()
 
     Note:
-        - Optimized for H100/H200 GPUs (Hopper architecture)
+        - FP8 benefits COMPUTE-BOUND workloads. Use larger batch sizes!
+        - Optimal on H100/H200 GPUs (Hopper architecture)
         - Works on A100 and newer (Ampere+) with reduced performance
-        - Compatible with LoRA/QLoRA for additional memory savings
-        - For multi-GPU: Use `accelerate launch` with FP8 config
-        - For advanced control: Use accelerate config file
-        - Follows Accelerate's FP8RecipeKwargs(backend="te") convention
+        - MUST call accelerator.prepare(model, optimizer) TOGETHER
+        - Use accelerator.backward(loss) instead of loss.backward()
 
     Reference:
         Based on HuggingFace Accelerate's Transformer Engine integration:
@@ -2403,14 +2420,6 @@ def setup_fp8_mixed_precision_training(
             "  - pip install accelerate>=0.26.0"
         )
 
-    import os
-
-    # Validate backend (match Accelerate's convention)
-    if backend.lower() != "te":
-        raise ValueError(
-            f"Unsloth: Currently only 'te' (Transformer Engine) backend is supported. Got: {backend}"
-        )
-
     # Check Transformer Engine is available
     try:
         import transformer_engine
@@ -2421,52 +2430,61 @@ def setup_fp8_mixed_precision_training(
             "Note: Requires CUDA 11.8+ and Hopper GPUs (H100/H200) for best performance."
         )
 
-    # Set environment variables for Accelerate FP8 support
-    # Matches: FP8RecipeKwargs(backend="te", fp8_format=..., ...)
-    os.environ["ACCELERATE_MIXED_PRECISION"] = "fp8"
-    os.environ["ACCELERATE_FP8_BACKEND"] = backend.upper()  # Accelerate expects uppercase "TE"
-    os.environ["ACCELERATE_FP8_FORMAT"] = fp8_format
-    os.environ["ACCELERATE_FP8_AMAX_HISTORY_LEN"] = str(amax_history_len)
-    os.environ["ACCELERATE_FP8_AMAX_COMPUTE_ALGO"] = amax_compute_algo
+    from accelerate import Accelerator
+    
+    # Try to use TERecipeKwargs (newer) or fall back to FP8RecipeKwargs
+    try:
+        from accelerate.utils import TERecipeKwargs
+        fp8_kwargs = TERecipeKwargs(
+            fp8_format=fp8_format,
+            amax_history_len=amax_history_len,
+            amax_compute_algo=amax_compute_algo,
+        )
+    except ImportError:
+        from accelerate.utils import FP8RecipeKwargs
+        fp8_kwargs = FP8RecipeKwargs(
+            backend="TE",
+            fp8_format=fp8_format,
+            amax_history_len=amax_history_len,
+            amax_compute_algo=amax_compute_algo,
+        )
+
+    # Create Accelerator with FP8 config
+    accelerator = Accelerator(
+        mixed_precision="fp8",
+        kwargs_handlers=[fp8_kwargs],
+    )
 
     logger.info(
-        f"Unsloth: FP8 mixed precision training enabled (Transformer Engine)\n"
-        f"  Backend: {backend}\n"
+        f"Unsloth: FP8 Accelerator created (Transformer Engine)\n"
         f"  Format: {fp8_format}\n"
         f"  Amax history: {amax_history_len}\n"
         f"  Amax algo: {amax_compute_algo}\n"
-        f"  Note: Optimal on H100/H200 GPUs"
+        f"  Note: Use accelerator.prepare(model, optimizer) together!\n"
+        f"  Note: Use larger batch sizes for best FP8 speedup"
     )
+
+    return accelerator
 
 
 def convert_to_fp8(model, convert_lnorm=False):
     """
-    Convert model's nn.Linear layers to Transformer Engine te.Linear for FP8 training.
+    [ADVANCED] Manually convert model's nn.Linear layers to te.Linear for FP8.
     
-    IMPORTANT: Call this AFTER loading the model but BEFORE creating the Trainer.
+    NOTE: For most users, use setup_fp8_mixed_precision_training() instead!
+    That function returns an Accelerator that handles conversion automatically
+    when you call accelerator.prepare(model, optimizer).
     
-    This is necessary because HuggingFace Trainer prepares model and optimizer
-    separately, but Accelerate's TE integration requires them together.
-    By converting manually, we bypass this limitation.
+    This function is only needed for advanced use cases where you want to
+    convert layers manually without using the full Accelerate workflow.
     
     Args:
         model: The PyTorch model to convert
         convert_lnorm: Whether to also convert LayerNorm to te.LayerNorm.
-            Default False because:
-            - Accelerate devs found te.LayerNorm doesn't provide speedup
-            - Unsloth already uses fast Triton kernels for RMSNorm
+            Default False (te.LayerNorm doesn't provide speedup).
         
     Returns:
         model: The converted model with te.Linear layers
-        
-    Example:
-        >>> from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, convert_to_fp8
-        >>> 
-        >>> setup_fp8_mixed_precision_training()
-        >>> model, tokenizer = FastLanguageModel.from_pretrained(...)
-        >>> model = FastLanguageModel.for_training(model)
-        >>> model = convert_to_fp8(model)  # Convert BEFORE creating Trainer!
-        >>> trainer = SFTTrainer(model=model, ...)
     """
     if not check_fp8_training_support():
         raise RuntimeError(
@@ -2523,52 +2541,18 @@ def convert_to_fp8(model, convert_lnorm=False):
 
 def apply_fp8_autocast(model, fp8_format="HYBRID", amax_history_len=32, amax_compute_algo="max"):
     """
-    Apply FP8 autocast wrapper to model's forward method.
+    [DEPRECATED] This function is no longer needed.
     
-    This wraps the model's forward in te.fp8_autocast context, enabling
-    FP8 compute for te.Linear layers during forward/backward passes.
+    Use setup_fp8_mixed_precision_training() instead, which returns an Accelerator
+    that automatically handles FP8 autocast when you call accelerator.prepare().
     
-    Args:
-        model: Model with te.Linear layers (from convert_to_fp8)
-        fp8_format: "HYBRID" (E4M3 fwd, E5M2 bwd), "E4M3", or "E5M2"
-        amax_history_len: History length for scaling factor computation
-        amax_compute_algo: "max" or "most_recent"
-        
-    Returns:
-        model: Model with fp8_autocast wrapped forward
+    This function is kept for backwards compatibility but will be removed in a future version.
     """
-    if not check_fp8_training_support():
-        raise RuntimeError("Unsloth: FP8 training not available.")
-    
-    import transformer_engine.pytorch as te
-    import transformer_engine.common.recipe as te_recipe
-    from accelerate.utils.transformer_engine import apply_fp8_autowrap
-    from accelerate.utils.dataclasses import FP8RecipeKwargs
-    
-    # Check if model has TE layers
-    has_te = any(isinstance(m, te.Linear) for m in model.modules())
-    if not has_te:
-        logger.warning(
-            "Unsloth: Model has no te.Linear layers! "
-            "Call convert_to_fp8(model) first."
-        )
-        return model
-    
-    # Create FP8 recipe kwargs
-    fp8_kwargs = FP8RecipeKwargs(
-        backend="TE",
-        fp8_format=fp8_format,
-        amax_history_len=amax_history_len,
-        amax_compute_algo=amax_compute_algo,
+    import warnings
+    warnings.warn(
+        "apply_fp8_autocast() is deprecated. Use setup_fp8_mixed_precision_training() instead, "
+        "which returns an Accelerator that handles FP8 autocast automatically.",
+        DeprecationWarning,
+        stacklevel=2,
     )
-    
-    # Apply autocast wrapper
-    model = apply_fp8_autowrap(model, fp8_kwargs)
-    
-    logger.info(
-        f"Unsloth: Applied FP8 autocast wrapper\n"
-        f"  Format: {fp8_format}\n"
-        f"  Amax history: {amax_history_len}"
-    )
-    
     return model
