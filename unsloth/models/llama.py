@@ -3399,16 +3399,24 @@ class FastLlamaModel:
             if hasattr(module, "gradient_checkpointing"):
                 module.gradient_checkpointing = use_gradient_checkpointing
 
-        # For full fine-tuning (not LoRA), we need to properly enable gradient checkpointing
-        # via gradient_checkpointing_enable() which sets _gradient_checkpointing_func.
-        # This is required by transformers 4.57+ GradientCheckpointingLayer.__call__()
-        if use_gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
-            model.gradient_checkpointing_enable(
-                gradient_checkpointing_kwargs={"use_reentrant": False}
-            )
-            # Also apply Unsloth's smart gradient checkpointing for memory savings
+        # For full fine-tuning, use prepare_model_for_training which properly sets up
+        # gradient checkpointing with Unsloth's optimizations
+        if use_gradient_checkpointing:
+            from unsloth_zoo.training_utils import prepare_model_for_training
+            # Apply Unsloth's smart gradient checkpointing patches first
             dtype = model.get_input_embeddings().weight.dtype
             patch_unsloth_smart_gradient_checkpointing(dtype=dtype)
+            # Then prepare the model with gradient checkpointing enabled
+            model = prepare_model_for_training(
+                model,
+                use_gradient_checkpointing=use_gradient_checkpointing,
+                use_reentrant=True,
+                full_finetuning=True,
+                train_layernorms=True,
+                train_embedding=True,
+                train_lm_head=True,
+                float32_mixed_precision=False,  # Use bfloat16 for full finetuning
+            )
 
         # Also re-enable training for embeddings for NEFTune
         if hasattr(model, "get_input_embeddings"):
