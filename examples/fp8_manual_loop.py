@@ -1,43 +1,36 @@
 #!/usr/bin/env python3
 """
-FP8 Training - Manual loop with plain HuggingFace model
-(Unsloth's fused loss causes OOM with FP8 + larger batches)
+FP8 Training with Unsloth - bypassing fused loss for FP8 compatibility
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
+os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Disable fused loss (incompatible with FP8)
 
 import torch
 import time
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from datasets import load_dataset
 from torch.utils.data import DataLoader
-from accelerate import Accelerator
-from accelerate.utils import FP8RecipeKwargs
 
 print("=" * 80)
-print("FP8 Training - HuggingFace Model (batch=2)")
+print("FP8 Training - Unsloth (fused loss disabled)")
 print("=" * 80)
 
-# Setup FP8 Accelerator
+# Setup FP8
 print("\n[1/4] Setting up FP8...")
-kwargs_handlers = [FP8RecipeKwargs(backend="TE", fp8_format="HYBRID", amax_history_len=32, amax_compute_algo="max")]
-accelerator = Accelerator(mixed_precision="fp8", kwargs_handlers=kwargs_handlers)
+accelerator = setup_fp8_mixed_precision_training()
 
-# Load model - plain HuggingFace (no Unsloth fused loss)
-print("\n[2/4] Loading model (HuggingFace, no Unsloth patches)...")
+# Load model with Unsloth
+print("\n[2/4] Loading model...")
 max_seq_length = 512
-
-model = AutoModelForCausalLM.from_pretrained(
-    "unsloth/Meta-Llama-3.1-8B-Instruct",
-    torch_dtype=torch.bfloat16,
-    device_map=None,  # Let accelerator handle device
+model, tokenizer = FastLanguageModel.from_pretrained(
+    model_name="unsloth/Meta-Llama-3.1-8B-Instruct",
+    max_seq_length=max_seq_length,
+    dtype=torch.bfloat16,
+    load_in_4bit=False,
 )
-tokenizer = AutoTokenizer.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct")
+model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 tokenizer.pad_token = tokenizer.eos_token
-
-# Disable gradient checkpointing
-if hasattr(model, 'gradient_checkpointing_disable'):
-    model.gradient_checkpointing_disable()
 
 # Prepare with FP8
 print("\n[3/4] Preparing with FP8...")
@@ -76,11 +69,12 @@ def collate(batch):
         "attention_mask": torch.stack([x["attention_mask"] for x in batch]),
     }
 
-dataloader = DataLoader(dataset, batch_size=2, shuffle=True, collate_fn=collate)
+# batch=4: 4 × 512 = 2048, divisible by 8 ✓
+dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=collate)
 
 # Training
 print("\n" + "=" * 80)
-print("Starting FP8 Training (batch=2, seq=512)")
+print("Starting FP8 Training (batch=4, seq=512)")
 print("=" * 80)
 
 model.train()
@@ -114,6 +108,6 @@ print("\n" + "=" * 80)
 print("FP8 Training Complete!")
 print("=" * 80)
 print(f"Time: {elapsed:.1f}s")
-print(f"Samples/sec: {num_steps * 2 / elapsed:.2f}")
+print(f"Samples/sec: {num_steps * 4 / elapsed:.2f}")
 print(f"Avg loss: {total_loss / num_steps:.4f}")
 print(f"Peak memory: {torch.cuda.max_memory_reserved() / 1e9:.2f} GB")
