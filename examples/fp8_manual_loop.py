@@ -69,12 +69,12 @@ def collate(batch):
         "attention_mask": torch.stack([x["attention_mask"] for x in batch]),
     }
 
-# batch=4: 4 × 512 = 2048, divisible by 8 ✓
-dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=collate)
+# batch=8: 8 × 512 = 4096, divisible by 8 ✓
+dataloader = DataLoader(dataset, batch_size=8, shuffle=True, collate_fn=collate)
 
 # Training
 print("\n" + "=" * 80)
-print("Starting FP8 Training (batch=4, seq=512)")
+print("Starting FP8 Training (batch=8, seq=512)")
 print("=" * 80)
 
 model.train()
@@ -108,6 +108,6 @@ print("\n" + "=" * 80)
 print("FP8 Training Complete!")
 print("=" * 80)
 print(f"Time: {elapsed:.1f}s")
-print(f"Samples/sec: {num_steps * 4 / elapsed:.2f}")
+print(f"Samples/sec: {num_steps * 8 / elapsed:.2f}")
 print(f"Avg loss: {total_loss / num_steps:.4f}")
 print(f"Peak memory: {torch.cuda.max_memory_reserved() / 1e9:.2f} GB")
