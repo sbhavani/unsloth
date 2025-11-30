@@ -10,8 +10,9 @@ os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
 import torch
 import torch.utils.checkpoint as torch_ckpt
 import transformer_engine.pytorch as te
+from functools import partial
 
-# Store original
+# Patch torch.utils.checkpoint
 _original_checkpoint = torch_ckpt.checkpoint
 
 def te_checkpoint_wrapper(function, *args, use_reentrant=True, **kwargs):
@@ -23,10 +24,28 @@ def te_checkpoint_wrapper(function, *args, use_reentrant=True, **kwargs):
         **kwargs
     )
 
-# Monkey-patch BEFORE importing Unsloth
 torch_ckpt.checkpoint = te_checkpoint_wrapper
 torch.utils.checkpoint.checkpoint = te_checkpoint_wrapper
-print("✅ Patched torch.utils.checkpoint with TE's FP8-compatible version")
+print("✅ Patched torch.utils.checkpoint")
+
+# Patch GradientCheckpointingLayer to use TE's checkpoint
+from transformers.modeling_layers import GradientCheckpointingLayer
+
+_original_gc_call = GradientCheckpointingLayer.__call__
+
+def te_gc_call(self, *args, **kwargs):
+    """GradientCheckpointingLayer that uses TE's checkpoint for FP8"""
+    if self.gradient_checkpointing and self.training:
+        # Use TE's checkpoint instead of torch's
+        return te.distributed.checkpoint(
+            partial(torch.nn.Module.__call__, self, **kwargs),
+            *args,
+            use_reentrant=True,
+        )
+    return torch.nn.Module.__call__(self, *args, **kwargs)
+
+GradientCheckpointingLayer.__call__ = te_gc_call
+print("✅ Patched GradientCheckpointingLayer with TE checkpoint")
 
 # NOW import everything else
 import time
