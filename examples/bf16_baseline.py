@@ -10,6 +10,19 @@ from unsloth import FastLanguageModel
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
+# Apply same gradient checkpointing patch as FP8 for fair comparison
+try:
+    from transformers.modeling_layers import GradientCheckpointingLayer
+    _original_call = GradientCheckpointingLayer.__call__
+    def _patched_call(self, *args, **kwargs):
+        if self.gradient_checkpointing and self.training:
+            if not hasattr(self, '_gradient_checkpointing_func') or self._gradient_checkpointing_func is None:
+                self.gradient_checkpointing = False
+        return _original_call(self, *args, **kwargs)
+    GradientCheckpointingLayer.__call__ = _patched_call
+except ImportError:
+    pass
+
 print("=" * 80)
 print("BF16 Baseline Training")
 print("=" * 80)
