@@ -72,6 +72,12 @@ for name, module in model.named_modules():
 
 # Run forward
 model.train()
+
+# Disable gradient checkpointing for this test
+for module in model.modules():
+    if hasattr(module, 'gradient_checkpointing'):
+        module.gradient_checkpointing = False
+
 input_ids = torch.randint(0, 32000, (2, 64), device="cuda")
 attention_mask = torch.ones_like(input_ids)
 
