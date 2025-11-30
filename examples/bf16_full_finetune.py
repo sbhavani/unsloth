@@ -12,7 +12,7 @@ from unsloth import FastLanguageModel
 from datasets import load_dataset
 from torch.utils.data import DataLoader
 
-BATCH_SIZE = 16  # Increased from 8 - we have memory headroom
+BATCH_SIZE = 32  # Increased from 16 - still have ~27GB headroom
 
 print("=" * 80)
 print(f"BF16 Full Fine-tuning (batch={BATCH_SIZE}, seq=512, WITH grad ckpt)")
