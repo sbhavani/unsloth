@@ -6,22 +6,16 @@ import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
 
+# MUST patch BEFORE importing anything else
 import torch
-import time
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
-from datasets import load_dataset
-from torch.utils.data import DataLoader
-
-# Patch torch.utils.checkpoint to use TE's version
-import transformer_engine.pytorch as te
 import torch.utils.checkpoint as torch_ckpt
+import transformer_engine.pytorch as te
 
 # Store original
 _original_checkpoint = torch_ckpt.checkpoint
 
 def te_checkpoint_wrapper(function, *args, use_reentrant=True, **kwargs):
     """Wrapper that uses TE's checkpoint for FP8 compatibility"""
-    # TE's checkpoint handles FP8 scaling factors correctly
     return te.distributed.checkpoint(
         function,
         *args,
@@ -29,9 +23,16 @@ def te_checkpoint_wrapper(function, *args, use_reentrant=True, **kwargs):
         **kwargs
     )
 
-# Monkey-patch torch's checkpoint with TE's version
+# Monkey-patch BEFORE importing Unsloth
 torch_ckpt.checkpoint = te_checkpoint_wrapper
+torch.utils.checkpoint.checkpoint = te_checkpoint_wrapper
 print("✅ Patched torch.utils.checkpoint with TE's FP8-compatible version")
+
+# NOW import everything else
+import time
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+from datasets import load_dataset
+from torch.utils.data import DataLoader
 
 print("=" * 80)
 print("FP8 + TE Checkpoint (native FP8 gradient checkpointing)")
