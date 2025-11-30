@@ -1,36 +1,43 @@
 #!/usr/bin/env python3
 """
-FP8 Training - Manual loop without Unsloth's fused loss
-This bypasses SFTTrainer to use larger batch sizes.
+FP8 Training - Manual loop with plain HuggingFace model
+(Unsloth's fused loss causes OOM with FP8 + larger batches)
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
 import torch
 import time
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from torch.utils.data import DataLoader
+from accelerate import Accelerator
+from accelerate.utils import FP8RecipeKwargs
 
 print("=" * 80)
-print("FP8 Training - Manual Loop (batch=8)")
+print("FP8 Training - HuggingFace Model (batch=8)")
 print("=" * 80)
 
-# Setup FP8
+# Setup FP8 Accelerator
 print("\n[1/4] Setting up FP8...")
-accelerator = setup_fp8_mixed_precision_training()
+kwargs_handlers = [FP8RecipeKwargs(backend="TE", fp8_format="HYBRID", amax_history_len=32, amax_compute_algo="max")]
+accelerator = Accelerator(mixed_precision="fp8", kwargs_handlers=kwargs_handlers)
 
-# Load model
-print("\n[2/4] Loading model...")
+# Load model - plain HuggingFace (no Unsloth fused loss)
+print("\n[2/4] Loading model (HuggingFace, no Unsloth patches)...")
 max_seq_length = 512
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Meta-Llama-3.1-8B-Instruct",
-    max_seq_length=max_seq_length,
-    dtype=torch.bfloat16,
-    load_in_4bit=False,
+
+model = AutoModelForCausalLM.from_pretrained(
+    "unsloth/Meta-Llama-3.1-8B-Instruct",
+    torch_dtype=torch.bfloat16,
+    device_map=None,  # Let accelerator handle device
 )
-model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
+tokenizer = AutoTokenizer.from_pretrained("unsloth/Meta-Llama-3.1-8B-Instruct")
 tokenizer.pad_token = tokenizer.eos_token
+
+# Disable gradient checkpointing
+if hasattr(model, 'gradient_checkpointing_disable'):
+    model.gradient_checkpointing_disable()
 
 # Prepare with FP8
 print("\n[3/4] Preparing with FP8...")
@@ -69,7 +76,6 @@ def collate(batch):
         "attention_mask": torch.stack([x["attention_mask"] for x in batch]),
     }
 
-# BATCH SIZE 8 - this works because we're not using fused loss!
 dataloader = DataLoader(dataset, batch_size=8, shuffle=True, collate_fn=collate)
 
 # Training
@@ -88,7 +94,6 @@ for step, batch in enumerate(dataloader):
     
     batch = {k: v.to(accelerator.device) for k, v in batch.items()}
     
-    # Standard forward with labels - NOT Unsloth's fused loss
     outputs = model(
         input_ids=batch["input_ids"],
         attention_mask=batch["attention_mask"],
