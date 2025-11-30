@@ -2481,6 +2481,13 @@ def convert_to_fp8(model, convert_lnorm=False):
         logger.info("Unsloth: Model already has TE layers, skipping conversion")
         return model
     
+    # Ensure Accelerator is initialized (required by convert_model's GatheredParameters)
+    from accelerate import Accelerator
+    from accelerate.state import AcceleratorState
+    if not AcceleratorState._shared_state:
+        # Initialize accelerator if not already done
+        _ = Accelerator()
+    
     # Count layers before
     num_linear_before = sum(1 for m in model.modules() if isinstance(m, torch.nn.Linear))
     
