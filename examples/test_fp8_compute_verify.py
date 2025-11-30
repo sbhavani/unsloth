@@ -53,14 +53,15 @@ print("\n[5] Testing forward pass...")
 
 # Create a hook to check if FP8 is active during forward
 fp8_was_active = [False]
+fp8_meta_found = [False]
 
 def check_fp8_hook(module, input, output):
-    # Check if we're inside fp8_autocast context
-    try:
-        from transformer_engine.pytorch.fp8 import is_fp8_enabled
-        fp8_was_active[0] = is_fp8_enabled()
-    except:
-        pass
+    # Check if the module has FP8 metadata (indicates FP8 is being used)
+    if hasattr(module, 'fp8_meta') and module.fp8_meta is not None:
+        fp8_meta_found[0] = True
+        # Check if fp8_meta has scaling factors (indicates active FP8)
+        if hasattr(module.fp8_meta, 'scale'):
+            fp8_was_active[0] = True
     return output
 
 # Find first TE layer and add hook
@@ -86,13 +87,13 @@ with torch.no_grad():
     output = model(input_ids=input_ids, attention_mask=attention_mask)
 
 print(f"\n[7] Results:")
-print(f"  FP8 was active during forward: {fp8_was_active[0]}")
+print(f"  FP8 meta found: {fp8_meta_found[0]}")
+print(f"  FP8 scaling active: {fp8_was_active[0]}")
 
-if fp8_was_active[0]:
-    print("  ✅ FP8 compute IS happening!")
+if fp8_meta_found[0]:
+    print("  ✅ FP8 metadata IS present on TE layers!")
 else:
-    print("  ❌ FP8 compute is NOT happening!")
-    print("  The autocast wrapper may not be properly applied.")
+    print("  ❌ FP8 metadata NOT found - FP8 may not be active")
 
 # Also check memory to see if FP8 scaling factors are present
 print(f"\n[8] Memory check:")

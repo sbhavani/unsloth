@@ -47,16 +47,13 @@ x = torch.randn(4, 128, 1024, device="cuda", dtype=torch.bfloat16)
 with torch.no_grad():
     y = model(x)
 print(f"  Output shape: {y.shape}")
-print(f"  is_fp8_enabled: {te.fp8.is_fp8_enabled()}")
 
 # Test forward WITH fp8_autocast
 print("\n[4] Forward WITH fp8_autocast:")
 with torch.no_grad():
     with fp8_autocast(enabled=True, fp8_recipe=fp8_recipe):
-        print(f"  Inside context - is_fp8_enabled: {te.fp8.is_fp8_enabled()}")
         y = model(x)
 print(f"  Output shape: {y.shape}")
-print(f"  After context - is_fp8_enabled: {te.fp8.is_fp8_enabled()}")
 
 # Check memory difference
 print("\n[5] Memory comparison:")
