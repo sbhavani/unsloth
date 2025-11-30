@@ -76,8 +76,14 @@ def tokenize_fn(examples):
     for inst, inp, out in zip(examples["instruction"], examples["input"], examples["output"]):
         texts.append(alpaca_prompt.format(inst, inp, out) + tokenizer.eos_token)
     # FIXED padding - all sequences exactly max_seq_length
-    tokens = tokenizer(texts, truncation=True, padding="max_length", max_length=max_seq_length)
-    tokens["labels"] = tokens["input_ids"].copy()
+    tokens = tokenizer(
+        texts, 
+        truncation=True, 
+        padding="max_length", 
+        max_length=max_seq_length,
+        return_attention_mask=True,
+    )
+    tokens["labels"] = [ids.copy() for ids in tokens["input_ids"]]
     return tokens
 
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
@@ -93,11 +99,17 @@ print("\n[5/5] Starting FP8 training...")
 
 # Simple collator that preserves fixed padding
 def fixed_collator(features):
-    return {
+    batch = {
         "input_ids": torch.stack([torch.tensor(f["input_ids"]) for f in features]),
-        "attention_mask": torch.stack([torch.tensor(f["attention_mask"]) for f in features]),
         "labels": torch.stack([torch.tensor(f["labels"]) for f in features]),
     }
+    # Add attention_mask if present, otherwise create from input_ids
+    if "attention_mask" in features[0]:
+        batch["attention_mask"] = torch.stack([torch.tensor(f["attention_mask"]) for f in features])
+    else:
+        # Create attention mask: 1 for non-pad tokens
+        batch["attention_mask"] = (batch["input_ids"] != tokenizer.pad_token_id).long()
+    return batch
 
 trainer = SFTTrainer(
     model=model,
