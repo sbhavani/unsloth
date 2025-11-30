@@ -6,37 +6,32 @@ import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
 
-# MUST patch BEFORE importing anything else
 import torch
-import torch.utils.checkpoint as torch_ckpt
-import transformer_engine.pytorch as te
+import time
 from functools import partial
 
-# Patch torch.utils.checkpoint
-_original_checkpoint = torch_ckpt.checkpoint
+# Import Unsloth first (as recommended)
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+from datasets import load_dataset
+from torch.utils.data import DataLoader
+import transformer_engine.pytorch as te
 
-def te_checkpoint_wrapper(function, *args, use_reentrant=True, **kwargs):
-    """Wrapper that uses TE's checkpoint for FP8 compatibility"""
-    return te.distributed.checkpoint(
-        function,
-        *args,
-        use_reentrant=use_reentrant,
-        **kwargs
-    )
+print("=" * 80)
+print("FP8 + TE Checkpoint (native FP8 gradient checkpointing)")
+print("=" * 80)
 
-torch_ckpt.checkpoint = te_checkpoint_wrapper
-torch.utils.checkpoint.checkpoint = te_checkpoint_wrapper
-print("✅ Patched torch.utils.checkpoint")
+# Setup FP8 (this applies Unsloth's patches)
+print("\n[1/6] Setting up FP8...")
+accelerator = setup_fp8_mixed_precision_training()
 
-# Patch GradientCheckpointingLayer to use TE's checkpoint
+# NOW patch GradientCheckpointingLayer AFTER Unsloth's setup
+print("\n[2/6] Patching GradientCheckpointingLayer with TE checkpoint...")
 from transformers.modeling_layers import GradientCheckpointingLayer
-
-_original_gc_call = GradientCheckpointingLayer.__call__
 
 def te_gc_call(self, *args, **kwargs):
     """GradientCheckpointingLayer that uses TE's checkpoint for FP8"""
     if self.gradient_checkpointing and self.training:
-        # Use TE's checkpoint instead of torch's
+        # Use TE's checkpoint instead of torch's - handles FP8 scaling factors
         return te.distributed.checkpoint(
             partial(torch.nn.Module.__call__, self, **kwargs),
             *args,
@@ -45,24 +40,10 @@ def te_gc_call(self, *args, **kwargs):
     return torch.nn.Module.__call__(self, *args, **kwargs)
 
 GradientCheckpointingLayer.__call__ = te_gc_call
-print("✅ Patched GradientCheckpointingLayer with TE checkpoint")
-
-# NOW import everything else
-import time
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
-from datasets import load_dataset
-from torch.utils.data import DataLoader
-
-print("=" * 80)
-print("FP8 + TE Checkpoint (native FP8 gradient checkpointing)")
-print("=" * 80)
-
-# Setup FP8
-print("\n[1/5] Setting up FP8...")
-accelerator = setup_fp8_mixed_precision_training()
+print("  ✅ Patched GradientCheckpointingLayer")
 
 # Load model
-print("\n[2/5] Loading model...")
+print("\n[3/6] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="unsloth/Meta-Llama-3.1-8B-Instruct",
@@ -70,20 +51,29 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     dtype=torch.bfloat16,
     load_in_4bit=False,
 )
-# Enable gradient checkpointing - will now use TE's version
+# Enable gradient checkpointing
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=True)
 tokenizer.pad_token = tokenizer.eos_token
 
+# Manually set _gradient_checkpointing_func so our TE patch doesn't get bypassed
+for module in model.modules():
+    if isinstance(module, GradientCheckpointingLayer):
+        module._gradient_checkpointing_func = te.distributed.checkpoint
+
 # Prepare with FP8
-print("\n[3/5] Preparing with FP8...")
+print("\n[4/6] Preparing with FP8...")
 optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 model, optimizer = accelerator.prepare(model, optimizer)
 
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear")
 
+# Verify gradient checkpointing is enabled
+gc_enabled = sum(1 for m in model.modules() if hasattr(m, 'gradient_checkpointing') and m.gradient_checkpointing)
+print(f"  Layers with gradient_checkpointing=True: {gc_enabled}")
+
 # Prepare dataset
-print("\n[4/5] Preparing dataset...")
+print("\n[5/6] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
 ### Instruction:
@@ -110,11 +100,10 @@ def collate(batch):
         "attention_mask": torch.stack([x["attention_mask"] for x in batch]),
     }
 
-# batch=6 for now (lm_head logits still large)
 dataloader = DataLoader(dataset, batch_size=6, shuffle=True, collate_fn=collate)
 
 # Training
-print("\n[5/5] Starting training...")
+print("\n[6/6] Starting training...")
 print("=" * 80)
 print("FP8 + TE Checkpoint Training (batch=6, seq=512)")
 print("=" * 80)
