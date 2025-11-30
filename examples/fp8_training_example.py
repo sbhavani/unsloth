@@ -117,7 +117,7 @@ trainer = SFTTrainer(
     train_dataset=dataset,
     data_collator=fixed_collator,
     args=SFTConfig(
-        per_device_train_batch_size=8,  # 8 × 512 = 4096, divisible by 8 ✓
+        per_device_train_batch_size=4,  # 4 × 512 = 2048, divisible by 8 ✓
         gradient_accumulation_steps=2,
         gradient_checkpointing=False,
         warmup_steps=5,
