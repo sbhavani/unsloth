@@ -9,14 +9,13 @@ Key differences from standard Unsloth:
 - FP8 works best with FULL fine-tuning (no LoRA) for maximum speedup
 - Must use accelerator.prepare(model, optimizer) together
 - Gradient checkpointing must be disabled (conflicts with FP8)
-- Use larger batch sizes (FP8 benefits compute-bound workloads)
-- Sequences must be padded to multiples of 8 for FP8 tensor requirements
+- Use packing=True with max_seq_length divisible by 8 (FP8 tensor requirement)
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
 import torch
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, FP8DataCollator
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
@@ -34,7 +33,8 @@ accelerator = setup_fp8_mixed_precision_training()
 # Step 2: Load model (following Unsloth pattern)
 # ============================================================================
 print("\n[2/5] Loading model...")
-max_seq_length = 2048
+# FP8 requires max_seq_length divisible by 8
+max_seq_length = 2048  # Divisible by 8 ✓
 dtype = torch.bfloat16
 
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -98,21 +98,13 @@ dataset = dataset.map(formatting_prompts_func, batched=True)
 # ============================================================================
 print("\n[5/5] Starting FP8 training...")
 
-# Ensure tokenizer has pad token
-if tokenizer.pad_token is None:
-    tokenizer.pad_token = tokenizer.eos_token
-
-# Use FP8-compatible data collator that pads to multiples of 8
-data_collator = FP8DataCollator(tokenizer=tokenizer, mlm=False)
-
 trainer = SFTTrainer(
     model=model,
     tokenizer=tokenizer,
     train_dataset=dataset,
     dataset_text_field="text",
     max_seq_length=max_seq_length,
-    data_collator=data_collator,
-    packing=False,
+    packing=True,  # Pack to max_seq_length (divisible by 8 for FP8)
     args=SFTConfig(
         per_device_train_batch_size=4,  # Larger batch = more FP8 benefit
         gradient_accumulation_steps=4,
@@ -121,7 +113,7 @@ trainer = SFTTrainer(
         max_steps=60,
         learning_rate=2e-5,
         logging_steps=10,
-        optim="adamw_torch",  # Use standard optimizer (already prepared)
+        optim="adamw_torch",
         weight_decay=0.01,
         lr_scheduler_type="linear",
         seed=3407,
