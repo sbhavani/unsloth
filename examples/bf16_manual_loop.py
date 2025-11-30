@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-BF16 Training - Manual loop for fair comparison with FP8
+BF16 Training with Unsloth - same settings as FP8 for fair comparison
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
+os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Same as FP8 test
 
 import torch
 import time
@@ -24,10 +25,10 @@ try:
 except: pass
 
 print("=" * 80)
-print("BF16 Training - Manual Loop (batch=8)")
+print("BF16 Training - Unsloth (fused loss disabled)")
 print("=" * 80)
 
-# Load model
+# Load model with Unsloth
 print("\n[1/3] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -69,10 +70,11 @@ def collate(batch):
         "attention_mask": torch.stack([x["attention_mask"] for x in batch]),
     }
 
-dataloader = DataLoader(dataset, batch_size=8, shuffle=True, collate_fn=collate)
+# Same batch=4 as FP8
+dataloader = DataLoader(dataset, batch_size=4, shuffle=True, collate_fn=collate)
 
 # Training
-print("\n[3/3] Starting BF16 Training (batch=8, seq=512)")
+print("\n[3/3] Starting BF16 Training (batch=4, seq=512)")
 print("=" * 80)
 
 model.train()
@@ -109,6 +111,6 @@ print("\n" + "=" * 80)
 print("BF16 Training Complete!")
 print("=" * 80)
 print(f"Time: {elapsed:.1f}s")
-print(f"Samples/sec: {num_steps * 8 / elapsed:.2f}")
+print(f"Samples/sec: {num_steps * 4 / elapsed:.2f}")
 print(f"Avg loss: {total_loss / num_steps:.4f}")
 print(f"Peak memory: {torch.cuda.max_memory_reserved() / 1e9:.2f} GB")
