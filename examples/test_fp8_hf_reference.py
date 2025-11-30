@@ -66,8 +66,12 @@ print(f"  Recipe: {fp8_recipe}")
 model.to("cuda")
 model.gradient_checkpointing_disable()
 
-# Test inputs
-input_ids = torch.randint(0, 32000, (4, 256), device="cuda")
+# Test inputs - LARGER batch to be compute-bound, not memory-bound
+# FP8 benefits compute-bound workloads
+BATCH_SIZE = 16  # Increased from 4
+SEQ_LEN = 512    # Increased from 256
+print(f"\n  Using batch_size={BATCH_SIZE}, seq_len={SEQ_LEN}")
+input_ids = torch.randint(0, 32000, (BATCH_SIZE, SEQ_LEN), device="cuda")
 attention_mask = torch.ones_like(input_ids)
 labels = input_ids.clone()
 
