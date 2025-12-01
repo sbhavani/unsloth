@@ -10,7 +10,7 @@ import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
 import torch
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, prepare_model_for_fp8
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
@@ -60,11 +60,9 @@ trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-# Prepare with FP8
+# Prepare with FP8 (using new helper - no dummy optimizer needed!)
 print("\n[3/4] Preparing with FP8...")
-_dummy_opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
-model, _ = accelerator.prepare(model, _dummy_opt)
-del _dummy_opt
+model = prepare_model_for_fp8(accelerator, model)
 
 import transformer_engine.pytorch as te
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))

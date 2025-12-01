@@ -2498,6 +2498,52 @@ def setup_fp8_mixed_precision_training(
     return accelerator
 
 
+def prepare_model_for_fp8(accelerator, model):
+    """
+    Prepare a model for FP8 training without needing to create an optimizer first.
+    
+    This is a convenience wrapper around accelerator.prepare() that handles the
+    optimizer requirement internally. Use this when you want the Trainer to 
+    create its own optimizer (e.g., with SFTTrainer).
+    
+    Args:
+        accelerator: The FP8 Accelerator from setup_fp8_mixed_precision_training()
+        model: The model to prepare for FP8 training
+        
+    Returns:
+        model: The FP8-prepared model with Transformer Engine layers
+        
+    Example:
+        >>> accelerator = setup_fp8_mixed_precision_training()
+        >>> model, tokenizer = FastLanguageModel.from_pretrained(...)
+        >>> model = FastLanguageModel.for_training(model)
+        >>> 
+        >>> # Simple one-liner instead of dummy optimizer dance
+        >>> model = prepare_model_for_fp8(accelerator, model)
+        >>> 
+        >>> # Now use with SFTTrainer (which creates its own optimizer)
+        >>> trainer = SFTTrainer(model=model, ...)
+    """
+    import torch
+    
+    # Create a minimal dummy optimizer just to satisfy accelerator.prepare()
+    # We use a small subset of parameters to minimize overhead
+    dummy_params = [p for p in model.parameters() if p.requires_grad][:1]
+    if not dummy_params:
+        # If no trainable params, use any param
+        dummy_params = [next(model.parameters())]
+    
+    dummy_optimizer = torch.optim.SGD(dummy_params, lr=1e-5)
+    
+    # Prepare model (this converts nn.Linear to te.Linear)
+    model, _ = accelerator.prepare(model, dummy_optimizer)
+    
+    # Clean up dummy optimizer
+    del dummy_optimizer
+    
+    return model
+
+
 def convert_to_fp8(model, convert_lnorm=False):
     """
     [ADVANCED] Manually convert model's nn.Linear layers to te.Linear for FP8.
