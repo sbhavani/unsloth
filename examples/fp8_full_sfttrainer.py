@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-FP8 + LoRA + SFTTrainer (matches notebook pattern exactly)
-
-Run with: python examples/fp8_lora_sfttrainer.py
-Compare with: python examples/bf16_typical_lora.py
+FP8 Full Fine-tuning with SFTTrainer
+All parameters trainable (no LoRA)
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
-os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Required for FP8 compatibility
+os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
 
 # Workaround for accelerate/TE compatibility issue
-# See: https://github.com/huggingface/accelerate/pull/3852
 import transformer_engine.pytorch as te
 if not hasattr(te, 'fp8'):
     class _FakeFP8:
@@ -25,15 +22,15 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
 print("=" * 80)
-print("FP8 + LoRA + SFTTrainer (notebook pattern)")
+print("FP8 Full Fine-tuning + SFTTrainer")
 print("=" * 80)
 
 # Setup FP8 FIRST
-print("\n[1/5] Setting up FP8...")
+print("\n[1/4] Setting up FP8...")
 accelerator = setup_fp8_mixed_precision_training()
 
-# Load model - same as notebook
-print("\n[2/5] Loading model...")
+# Load model with full_finetuning=True
+print("\n[2/4] Loading model...")
 max_seq_length = 2048
 
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -41,49 +38,27 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
+    full_finetuning=True,  # Enable full fine-tuning with gradient checkpointing
 )
 
-# Add LoRA adapters - same as notebook
-print("\n[3/5] Adding LoRA adapters...")
-model = FastLanguageModel.get_peft_model(
-    model,
-    r=16,
-    target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
-                    "gate_proj", "up_proj", "down_proj"],
-    lora_alpha=16,
-    lora_dropout=0,
-    bias="none",
-    use_gradient_checkpointing="unsloth",
-    random_state=3407,
-)
-
+# No get_peft_model() - we're doing full fine-tuning
+model = FastLanguageModel.for_training(model)
 tokenizer.pad_token = tokenizer.eos_token
 
-# Prepare model with FP8 (must pass model AND optimizer together for TE)
-print("\n[4/5] Preparing model with FP8...")
-optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4)
+# Prepare model with FP8
+print("\n[3/4] Preparing model with FP8...")
+optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
 model, optimizer = accelerator.prepare(model, optimizer)
 
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear")
 
-if te_count == 0:
-    print("  WARNING: No te.Linear layers found - FP8 may not be active!")
-else:
-    print(f"  FP8 active with {te_count} TE layers")
-
-# Re-freeze base model params (accelerator.prepare may have unfrozen them)
-# Only LoRA params should be trainable
-for name, param in model.named_parameters():
-    if "lora_" not in name.lower():
-        param.requires_grad = False
-
 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable params: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-# Prepare dataset - same as notebook
-print("\n[5/5] Preparing dataset...")
+# Prepare dataset
+print("\n[4/4] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
 ### Instruction:
@@ -106,7 +81,7 @@ def formatting_prompts_func(examples):
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
 dataset = dataset.map(formatting_prompts_func, batched=True)
 
-# Train with SFTTrainer - identical to notebook
+# Train with SFTTrainer
 print("\nStarting training...")
 print("=" * 80)
 
@@ -118,26 +93,26 @@ trainer = SFTTrainer(
     max_seq_length=max_seq_length,
     packing=False,
     args=SFTConfig(
-        per_device_train_batch_size=8,
-        gradient_accumulation_steps=2,
+        per_device_train_batch_size=2,  # Smaller batch for full FT memory
+        gradient_accumulation_steps=8,  # Effective batch = 16
         warmup_steps=5,
         max_steps=60,
-        learning_rate=2e-4,
+        learning_rate=2e-5,  # Lower LR for full FT
         logging_steps=10,
-        optim="adamw_8bit",
+        optim="adamw_torch",  # Standard optimizer (already prepared)
         weight_decay=0.01,
         lr_scheduler_type="linear",
         seed=3407,
         output_dir="outputs",
         report_to="none",
-        bf16=True,  # Accelerate handles FP8 conversion
+        bf16=True,
     ),
 )
 
 trainer_stats = trainer.train()
 
 print("\n" + "=" * 80)
-print("FP8 + LoRA + SFTTrainer Complete!")
+print("FP8 Full Fine-tuning Complete!")
 print("=" * 80)
 print(f"Time: {trainer_stats.metrics['train_runtime']:.1f}s")
 print(f"Samples/sec: {trainer_stats.metrics['train_samples_per_second']:.2f}")
