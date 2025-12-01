@@ -20,14 +20,13 @@ if not hasattr(te, 'fp8'):
     te.fp8 = _FakeFP8()
 
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForLanguageModeling
 from accelerate import Accelerator
 from accelerate.utils import FP8RecipeKwargs
 from datasets import load_dataset
-from trl import SFTTrainer, SFTConfig
 
 print("=" * 80)
-print("FP8 Full Fine-tuning + SFTTrainer (Llama-3.2-3B)")
+print("FP8 Full Fine-tuning + Trainer (Llama-3.2-3B)")
 print("=" * 80)
 
 # Setup FP8 accelerator directly (not via Unsloth)
@@ -70,7 +69,7 @@ model, optimizer = accelerator.prepare(model, optimizer)
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear")
 
-# Prepare dataset
+# Prepare dataset - pre-tokenize for compatibility
 print("\n[4/4] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
@@ -85,41 +84,52 @@ alpaca_prompt = """Below is an instruction that describes a task, paired with an
 
 EOS_TOKEN = tokenizer.eos_token
 
-def formatting_prompts_func(examples):
+def tokenize_function(examples):
     texts = []
     for inst, inp, out in zip(examples["instruction"], examples["input"], examples["output"]):
         texts.append(alpaca_prompt.format(inst, inp, out) + EOS_TOKEN)
-    return {"text": texts}
+    
+    tokenized = tokenizer(
+        texts,
+        truncation=True,
+        max_length=max_seq_length,
+        padding="max_length",
+        return_tensors=None,
+    )
+    tokenized["labels"] = tokenized["input_ids"].copy()
+    return tokenized
 
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
-dataset = dataset.map(formatting_prompts_func, batched=True)
+dataset = dataset.map(tokenize_function, batched=True, remove_columns=dataset.column_names)
 
-# Train with SFTTrainer
+# Train with standard Trainer (more compatible than SFTTrainer with FP8)
 print("\nStarting training...")
 print("=" * 80)
 
-trainer = SFTTrainer(
+training_args = TrainingArguments(
+    per_device_train_batch_size=8,  # Must be >= 8 for FP8 alignment
+    gradient_accumulation_steps=2,  # Effective batch = 16
+    warmup_steps=5,
+    max_steps=60,
+    learning_rate=2e-5,  # Lower LR for full FT
+    logging_steps=10,
+    optim="adamw_torch",  # Standard optimizer (already prepared)
+    weight_decay=0.01,
+    lr_scheduler_type="linear",
+    seed=3407,
+    output_dir="outputs",
+    report_to="none",
+    bf16=True,
+    remove_unused_columns=False,
+)
+
+data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+
+trainer = Trainer(
     model=model,
-    processing_class=tokenizer,
+    args=training_args,
     train_dataset=dataset,
-    args=SFTConfig(
-        per_device_train_batch_size=8,  # Must be >= 8 for FP8 alignment
-        gradient_accumulation_steps=2,  # Effective batch = 16
-        warmup_steps=5,
-        max_steps=60,
-        learning_rate=2e-5,  # Lower LR for full FT
-        logging_steps=10,
-        optim="adamw_torch",  # Standard optimizer (already prepared)
-        weight_decay=0.01,
-        lr_scheduler_type="linear",
-        seed=3407,
-        output_dir="outputs",
-        report_to="none",
-        bf16=True,
-        dataset_text_field="text",
-        max_seq_length=max_seq_length,
-        packing=False,
-    ),
+    data_collator=data_collator,
 )
 
 trainer_stats = trainer.train()
