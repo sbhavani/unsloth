@@ -47,8 +47,12 @@ model.config.use_cache = True  # Enable cache when not using GC
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
-# Prepare with FP8
+# FIX: Unfreeze all parameters BEFORE FP8 preparation
 print("\n[3/4] Preparing with FP8...")
+print("  Unfreezing all parameters for full fine-tuning...")
+for param in model.parameters():
+    param.requires_grad = True
+
 _dummy_opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
 model, _ = accelerator.prepare(model, _dummy_opt)
 del _dummy_opt

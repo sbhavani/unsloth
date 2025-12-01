@@ -54,6 +54,15 @@ for name, param in model.named_parameters():
     if not param.requires_grad:
         print(f"    - {name}: {param.numel():,} params")
 
+# FIX: Unfreeze all parameters for full fine-tuning
+print("  Unfreezing all parameters for full fine-tuning...")
+for param in model.parameters():
+    param.requires_grad = True
+
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print(f"  After unfreeze: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+
 # Prepare dataset (notebook pattern)
 print("\n[2/3] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
