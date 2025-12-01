@@ -48,8 +48,9 @@ model = AutoModelForCausalLM.from_pretrained(
     attn_implementation="flash_attention_2",
 )
 
-# Enable standard gradient checkpointing
-model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+# NOTE: Gradient checkpointing conflicts with TE FP8 backward pass
+# Disabled for FP8 - uses more memory but avoids cuBLAS GEMM errors
+# model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.pad_token = tokenizer.eos_token
@@ -105,6 +106,7 @@ trainer = SFTTrainer(
     args=SFTConfig(
         per_device_train_batch_size=8,  # Must be >= 8 for FP8 alignment
         gradient_accumulation_steps=2,  # Effective batch = 16
+        gradient_checkpointing=False,  # Conflicts with TE FP8 backward
         warmup_steps=5,
         max_steps=60,
         learning_rate=2e-5,  # Lower LR for full FT
