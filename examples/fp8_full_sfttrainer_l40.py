@@ -1,20 +1,28 @@
 #!/usr/bin/env python3
 """
 FP8 Full Fine-tuning with SFTTrainer - L40 Compatible
-Tests the auto-detection fix for FP8/TE layers with fused CE loss.
+Uses full_finetuning=True with UNSLOTH_RETURN_LOGITS=1 to disable fused CE loss.
 
 Uses 3B model (fits in L40 memory without gradient checkpointing).
 """
 import os
 import shutil
 
-# Clear compiled cache to ensure fresh compilation with FP8 fix
-cache_path = "./unsloth_compiled_cache"
+# CRITICAL: Set env var BEFORE importing unsloth to disable fused CE loss at compile time
+os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
+os.environ["HF_DATASETS_NUM_PROC"] = "1"
+
+# Clear compiled cache to ensure fresh compilation
+cache_path = os.path.join(os.path.dirname(__file__), "..", "unsloth_compiled_cache")
+cache_path = os.path.abspath(cache_path)
 if os.path.exists(cache_path):
     shutil.rmtree(cache_path)
     print(f"Cleared {cache_path}")
-
-os.environ["HF_DATASETS_NUM_PROC"] = "1"
+else:
+    # Also try current directory
+    if os.path.exists("./unsloth_compiled_cache"):
+        shutil.rmtree("./unsloth_compiled_cache")
+        print("Cleared ./unsloth_compiled_cache")
 
 import torch
 from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
@@ -82,17 +90,7 @@ del _dummy_opt
 import transformer_engine.pytorch as te
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear")
-
-# CRITICAL: Set FP8 mode flag to disable fused CE loss
-# This must be done AFTER accelerator.prepare() converts layers to TE
-# Find the base model and set the flag
-base_model = model
-while hasattr(base_model, 'module'):
-    base_model = base_model.module
-while hasattr(base_model, 'model') and not hasattr(base_model, '_unsloth_fp8_mode'):
-    base_model = base_model.model
-base_model._unsloth_fp8_mode = True
-print("  ✓ Set _unsloth_fp8_mode=True to disable fused CE loss")
+print("  ✓ UNSLOTH_RETURN_LOGITS=1 disables fused CE loss (set before import)")
 
 if te_count == 0:
     print("  ERROR: No TE layers found! FP8 conversion may have failed.")
@@ -174,8 +172,8 @@ used_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
 print(f"Peak memory: {used_memory} GB")
 
 print("\n" + "=" * 80)
-print("FP8 AUTO-DETECTION FIX VERIFIED!")
+print("FP8 + full_finetuning=True VERIFIED!")
+print("- UNSLOTH_RETURN_LOGITS=1 disabled fused CE loss")
 print("- full_finetuning=True works with FP8")
-print("- Fused CE loss was auto-disabled")
-print("- No UNSLOTH_RETURN_LOGITS workaround needed")
+print("- Gradient offloading enabled ('smartly offload gradients')")
 print("=" * 80)
