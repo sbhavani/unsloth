@@ -38,10 +38,12 @@ model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"  # Ensure consistent padding
 
-# Prepare with FP8 (like manual loop)
+# Prepare model with FP8 (converts to te.Linear)
+# Note: TE requires model+optimizer together for prepare()
 print("\n[3/4] Preparing with FP8...")
-optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
-model, optimizer = accelerator.prepare(model, optimizer)
+_dummy_opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
+model, _ = accelerator.prepare(model, _dummy_opt)
+del _dummy_opt  # Trainer will create its own optimizer
 
 import transformer_engine.pytorch as te
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
@@ -99,13 +101,13 @@ data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 trainer = Trainer(
     model=model,
     args=TrainingArguments(
-        per_device_train_batch_size=8,  # 8 × 512 = 4096, divisible by 8 ✓
-        gradient_accumulation_steps=2,  # Effective batch = 16
+        per_device_train_batch_size=4,  # 4 × 512 = 2048, divisible by 8 ✓
+        gradient_accumulation_steps=4,  # Effective batch = 16
         warmup_steps=5,
         max_steps=60,
         learning_rate=2e-5,
         logging_steps=10,
-        optim="adamw_torch",
+        optim="adamw_8bit",  # Save memory
         weight_decay=0.01,
         lr_scheduler_type="linear",
         seed=3407,
