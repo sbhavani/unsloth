@@ -22,7 +22,7 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
 print("=" * 80)
-print("FP8 Full Fine-tuning + SFTTrainer")
+print("FP8 Full Fine-tuning + SFTTrainer (Qwen2.5-7B)")
 print("=" * 80)
 
 # Setup FP8 FIRST
@@ -34,7 +34,7 @@ print("\n[2/4] Loading model...")
 max_seq_length = 512
 
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Meta-Llama-3.1-8B",
+    model_name="unsloth/Qwen2.5-7B",
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
