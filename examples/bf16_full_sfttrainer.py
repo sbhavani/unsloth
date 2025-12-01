@@ -17,7 +17,7 @@ print("=" * 80)
 
 # Load model with full_finetuning=True
 print("\n[1/3] Loading model...")
-max_seq_length = 2048
+max_seq_length = 512
 
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="unsloth/Meta-Llama-3.1-8B",
@@ -71,8 +71,8 @@ trainer = SFTTrainer(
     max_seq_length=max_seq_length,
     packing=False,
     args=SFTConfig(
-        per_device_train_batch_size=2,  # Smaller batch for full FT memory
-        gradient_accumulation_steps=8,  # Effective batch = 16
+        per_device_train_batch_size=1,  # Minimal batch for full FT memory
+        gradient_accumulation_steps=16,  # Effective batch = 16
         warmup_steps=5,
         max_steps=60,
         learning_rate=2e-5,  # Lower LR for full FT
