@@ -13,7 +13,7 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
 print("=" * 80)
-print("FP8 Full Fine-tuning + SFTTrainer (Llama-3.2-3B)")
+print("FP8 Full Fine-tuning + SFTTrainer (Llama-3.1-8B)")
 print("=" * 80)
 
 # Check GPU
@@ -30,7 +30,7 @@ accelerator = setup_fp8_mixed_precision_training()
 print("\n[2/4] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Llama-3.2-3B",
+    model_name="unsloth/Meta-Llama-3.1-8B",
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
@@ -125,7 +125,6 @@ trainer = SFTTrainer(
         remove_unused_columns=False,
         dataloader_num_workers=0,
         dataloader_pin_memory=False,
-        torch_compile=True,  # Compile training loop
     ),
 )
 
