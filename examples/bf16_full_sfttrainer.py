@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
-BF16 Full Fine-tuning with SFTTrainer
+BF16 Full Fine-tuning with SFTTrainer (baseline comparison)
 All parameters trainable (no LoRA)
+NOTE: Uses same setup as FP8 version (raw HF, no Unsloth optimizations) for fair comparison
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
 import torch
-from unsloth import FastLanguageModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
@@ -15,25 +16,30 @@ print("=" * 80)
 print("BF16 Full Fine-tuning + SFTTrainer (Llama-3.2-3B)")
 print("=" * 80)
 
-# Load model with full_finetuning=True
+# Load model directly with HF (same as FP8 version for fair comparison)
 print("\n[1/3] Loading model...")
 max_seq_length = 512
+model_name = "unsloth/Llama-3.2-3B"
 
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Llama-3.2-3B",
-    max_seq_length=max_seq_length,
-    dtype=torch.bfloat16,
-    load_in_4bit=False,
-    full_finetuning=True,  # Enable full fine-tuning with gradient checkpointing
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",
+    attn_implementation="flash_attention_2",
 )
 
-# No get_peft_model() - we're doing full fine-tuning
-model = FastLanguageModel.for_training(model)
-tokenizer.pad_token = tokenizer.eos_token
+# Enable standard gradient checkpointing
+model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
 
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = "right"
+
+# Verify all params trainable
 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
-print(f"  Trainable params: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+print(f"  Model loaded: {total:,} params")
+print(f"  Trainable: {trainable:,} ({100*trainable/total:.2f}%)")
 
 # Prepare dataset
 print("\n[2/3] Preparing dataset...")
@@ -60,7 +66,7 @@ dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
 dataset = dataset.map(formatting_prompts_func, batched=True)
 
 # Train with SFTTrainer
-print("\n[3/3] Starting training...")
+print("\n[3/3] Training...")
 print("=" * 80)
 
 trainer = SFTTrainer(

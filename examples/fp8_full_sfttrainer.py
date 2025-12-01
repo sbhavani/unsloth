@@ -2,10 +2,13 @@
 """
 FP8 Full Fine-tuning with SFTTrainer
 All parameters trainable (no LoRA)
+NOTE: Does NOT use full_finetuning=True to avoid Unsloth optimizations 
+that conflict with TE FP8 (fused CE loss, smart gradient offload)
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
-os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
+# Disable Unsloth's special optimizations that conflict with FP8
+os.environ["UNSLOTH_RETURN_LOGITS"] = "0"
 
 # Workaround for accelerate/TE compatibility issue
 import transformer_engine.pytorch as te
@@ -17,7 +20,9 @@ if not hasattr(te, 'fp8'):
     te.fp8 = _FakeFP8()
 
 import torch
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+from transformers import AutoModelForCausalLM, AutoTokenizer
+from accelerate import Accelerator
+from accelerate.utils import FP8RecipeKwargs
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
@@ -25,37 +30,45 @@ print("=" * 80)
 print("FP8 Full Fine-tuning + SFTTrainer (Llama-3.2-3B)")
 print("=" * 80)
 
-# Setup FP8 FIRST
-print("\n[1/4] Setting up FP8...")
-accelerator = setup_fp8_mixed_precision_training()
+# Setup FP8 accelerator directly (not via Unsloth)
+print("\n[1/4] Setting up FP8 accelerator...")
+fp8_recipe = FP8RecipeKwargs(backend="te")
+accelerator = Accelerator(mixed_precision="fp8", kwargs_handlers=[fp8_recipe])
+print(f"  Device: {accelerator.device}")
 
-# Load model with full_finetuning=True
+# Load model directly with HF (avoid Unsloth's special optimizations)
 print("\n[2/4] Loading model...")
 max_seq_length = 512
+model_name = "unsloth/Llama-3.2-3B"
 
-model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Llama-3.2-3B",
-    max_seq_length=max_seq_length,
-    dtype=torch.bfloat16,
-    load_in_4bit=False,
-    full_finetuning=True,  # Enable full fine-tuning with gradient checkpointing
+model = AutoModelForCausalLM.from_pretrained(
+    model_name,
+    torch_dtype=torch.bfloat16,
+    device_map="auto",
+    attn_implementation="flash_attention_2",
 )
 
-# No get_peft_model() - we're doing full fine-tuning
-model = FastLanguageModel.for_training(model)
+# Enable standard gradient checkpointing
+model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
+
+tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.pad_token = tokenizer.eos_token
+tokenizer.padding_side = "right"
+
+# Verify all params trainable
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print(f"  Model loaded: {total:,} params")
+print(f"  Trainable: {trainable:,} ({100*trainable/total:.2f}%)")
 
 # Prepare model with FP8
 print("\n[3/4] Preparing model with FP8...")
-optimizer = torch.optim.AdamW(model.parameters(), lr=2e-5)
+import bitsandbytes as bnb
+optimizer = bnb.optim.AdamW8bit(model.parameters(), lr=2e-5)
 model, optimizer = accelerator.prepare(model, optimizer)
 
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear")
-
-trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-total = sum(p.numel() for p in model.parameters())
-print(f"  Trainable params: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
 # Prepare dataset
 print("\n[4/4] Preparing dataset...")
