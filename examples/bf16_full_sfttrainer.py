@@ -89,8 +89,8 @@ trainer = SFTTrainer(
     processing_class=tokenizer,
     train_dataset=dataset,
     args=SFTConfig(
-        per_device_train_batch_size=8,
-        gradient_accumulation_steps=2,  # Effective batch = 16
+        per_device_train_batch_size=16,
+        gradient_accumulation_steps=1,  # No accumulation overhead
         gradient_checkpointing=False,   # Match FP8 for fair comparison
         warmup_steps=5,
         max_steps=60,
