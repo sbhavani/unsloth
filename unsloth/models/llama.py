@@ -1371,6 +1371,16 @@ def CausalLM_fast_forward(fast_forward_inference):
             logits = self.lm_head(hidden_states[:, -num_logits_to_keep:, :].to(dtype))
         else:
             RETURN_LOGITS = os.environ.get("UNSLOTH_RETURN_LOGITS", "0") == "1"
+            
+            # Auto-detect FP8/Transformer Engine layers - fused CE loss is incompatible
+            if not RETURN_LOGITS:
+                try:
+                    import transformer_engine.pytorch as te
+                    if any(isinstance(m, te.Linear) for m in self.modules()):
+                        RETURN_LOGITS = True  # Skip fused loss for FP8
+                except ImportError:
+                    pass
+            
             # < 1024 Normal Unsloth uses less VRAM!
             if bsz * q_len <= 1024 and not RETURN_LOGITS:
                 # Use unsloth_fused_ce_loss which actually calculates the best chunk size to reduce VRAM usage
