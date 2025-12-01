@@ -2541,6 +2541,11 @@ def prepare_model_for_fp8(accelerator, model):
     # Clean up dummy optimizer
     del dummy_optimizer
     
+    # Set flag to skip fused CE loss (incompatible with TE layers)
+    # This flag can be checked by unsloth-zoo's fused_cross_entropy_loss
+    # Only affects FP8 users - regular users won't have this flag set
+    model._unsloth_skip_fused_loss = True
+    
     return model
 
 
