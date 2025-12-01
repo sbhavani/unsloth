@@ -29,10 +29,10 @@ model, tokenizer = FastLanguageModel.from_pretrained(
 print("\n[2/4] Adding LoRA adapters...")
 model = FastLanguageModel.get_peft_model(
     model,
-    r=16,
+    r=64,  # Higher rank for more trainable params
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj",
                     "gate_proj", "up_proj", "down_proj"],
-    lora_alpha=16,
+    lora_alpha=64,
     lora_dropout=0,
     bias="none",
     use_gradient_checkpointing="unsloth",  # Typical Unsloth setting
