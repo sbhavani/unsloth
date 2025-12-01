@@ -1,12 +1,18 @@
 #!/usr/bin/env python3
 """
 FP8 Full Fine-tuning with SFTTrainer
-Matches Unsloth notebook pattern as closely as possible
+Uses full_finetuning=True with fused CE loss disabled via env var
 """
+# CRITICAL: Set env var and clear cache BEFORE importing unsloth
 import os
+os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Disable fused CE loss
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
-os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Disable fused loss (incompatible with FP8)
 
+import shutil
+shutil.rmtree("./unsloth_compiled_cache", ignore_errors=True)
+print("Cleared unsloth_compiled_cache")
+
+# Now import unsloth
 import torch
 from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from datasets import load_dataset
@@ -26,18 +32,15 @@ print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 print("\n[1/4] Setting up FP8...")
 accelerator = setup_fp8_mixed_precision_training()
 
-# Load model with Unsloth (same as notebook)
+# Load model with full_finetuning=True (fused CE loss disabled via env var)
 print("\n[2/4] Loading model...")
 max_seq_length = 512
-# NOTE: For FP8, we can't use full_finetuning=True because it enables
-# Unsloth's fused CE loss which conflicts with TE FP8 tensors.
-# Instead, we manually unfreeze all parameters.
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="unsloth/Llama-3.2-3B",
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    # full_finetuning=True,  # Can't use with FP8 - conflicts with fused CE loss
+    full_finetuning=True,  # Now safe with UNSLOTH_RETURN_LOGITS=1
 )
 
 # For full fine-tuning: skip get_peft_model(), just call for_training()
@@ -46,20 +49,17 @@ model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 # Explicitly disable gradient checkpointing on model (Unsloth may enable it)
 if hasattr(model, 'gradient_checkpointing_disable'):
     model.gradient_checkpointing_disable()
-model.config.use_cache = True  # Enable cache when not using GC
+model.config.use_cache = True
 
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+
 # Prepare with FP8
 print("\n[3/4] Preparing with FP8...")
-
-# Manually unfreeze ALL parameters for full fine-tuning
-# (can't use full_finetuning=True due to fused CE loss conflict)
-print("  Unfreezing all parameters for full fine-tuning...")
-for param in model.parameters():
-    param.requires_grad = True
-
 _dummy_opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
 model, _ = accelerator.prepare(model, _dummy_opt)
 del _dummy_opt
@@ -70,7 +70,7 @@ print(f"  Converted {te_count} layers to te.Linear")
 
 trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
-print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+print(f"  After FP8 prep: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
 # Prepare dataset - must pre-tokenize with fixed padding for FP8 alignment
 print("\n[4/4] Preparing dataset...")
@@ -88,7 +88,6 @@ alpaca_prompt = """Below is an instruction that describes a task, paired with an
 EOS_TOKEN = tokenizer.eos_token
 
 # FP8 requires fixed sequence lengths for dimension alignment
-# Pre-tokenize with padding="max_length" to ensure batch×seq is divisible by 8
 def tokenize_and_format(examples):
     texts = [alpaca_prompt.format(i, inp, o) + EOS_TOKEN 
              for i, inp, o in zip(examples["instruction"], examples["input"], examples["output"])]
@@ -99,7 +98,7 @@ def tokenize_and_format(examples):
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
 dataset = dataset.map(tokenize_and_format, batched=True, remove_columns=dataset.column_names)
 
-# Train with SFTTrainer (notebook pattern)
+# Train with SFTTrainer
 print("\nStarting training...")
 print("=" * 80)
 
@@ -108,9 +107,9 @@ trainer = SFTTrainer(
     processing_class=tokenizer,
     train_dataset=dataset,
     args=SFTConfig(
-        per_device_train_batch_size=4,  # 4 × 512 = 2048, divisible by 8 ✓
-        gradient_accumulation_steps=4,  # Effective batch = 16
-        gradient_checkpointing=False,   # Conflicts with FP8 on L40
+        per_device_train_batch_size=4,
+        gradient_accumulation_steps=4,
+        gradient_checkpointing=False,
         warmup_steps=5,
         max_steps=60,
         learning_rate=2e-5,
@@ -123,7 +122,6 @@ trainer = SFTTrainer(
         report_to="none",
         bf16=True,
         remove_unused_columns=False,
-        # Skip dataset_text_field - data is pre-tokenized for FP8 alignment
     ),
 )
 
