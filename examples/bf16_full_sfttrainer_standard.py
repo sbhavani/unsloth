@@ -22,8 +22,7 @@ gpu_cap = torch.cuda.get_device_capability(0)
 print(f"\nGPU: {gpu_name}")
 print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 
-# Load model
-# NOTE: Not using full_finetuning=True to match FP8 for fair comparison
+# Load model with full_finetuning=True
 print("\n[1/3] Loading model...")
 max_seq_length = 2048  # Standard seq length
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -31,13 +30,10 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
+    full_finetuning=True,
 )
 
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
-
-# Manually unfreeze all parameters (matching FP8 for fair comparison)
-for param in model.parameters():
-    param.requires_grad = True
 
 # Disable gradient checkpointing (matching FP8 for fair comparison)
 if hasattr(model, 'gradient_checkpointing_disable'):

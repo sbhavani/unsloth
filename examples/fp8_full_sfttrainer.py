@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
 FP8 Full Fine-tuning with SFTTrainer
-Does NOT use full_finetuning=True to avoid fused CE loss conflict with FP8/TE.
-Instead, manually unfreezes all parameters.
+Uses full_finetuning=True - fused CE loss is auto-disabled when FP8/TE layers detected.
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
@@ -26,7 +25,8 @@ print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 print("\n[1/4] Setting up FP8...")
 accelerator = setup_fp8_mixed_precision_training()
 
-# Load model WITHOUT full_finetuning=True (to avoid fused CE loss conflict with FP8)
+# Load model with full_finetuning=True
+# Fused CE loss is auto-disabled when FP8/TE layers are detected
 print("\n[2/4] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -34,18 +34,14 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    # Note: NOT using full_finetuning=True - we'll manually unfreeze params
+    full_finetuning=True,  # Now works with FP8!
 )
 
 # For full fine-tuning: skip get_peft_model(), just call for_training()
+# Note: Gradient checkpointing disabled for FP8 (cuBLAS issues on some GPUs)
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 
-# Manually unfreeze ALL parameters for full fine-tuning
-# (This is what full_finetuning=True does, but without the fused CE loss)
-for param in model.parameters():
-    param.requires_grad = True
-
-# Explicitly disable gradient checkpointing on model (Unsloth may enable it)
+# Explicitly disable gradient checkpointing (Unsloth may enable it)
 if hasattr(model, 'gradient_checkpointing_disable'):
     model.gradient_checkpointing_disable()
 model.config.use_cache = True

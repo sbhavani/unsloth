@@ -22,9 +22,7 @@ gpu_cap = torch.cuda.get_device_capability(0)
 print(f"\nGPU: {gpu_name}")
 print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 
-# Load model with Unsloth
-# NOTE: NOT using full_finetuning=True for fair comparison with FP8
-# (FP8 can't use it due to fused CE loss conflict with Transformer Engine)
+# Load model with full_finetuning=True
 print("\n[1/3] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -32,15 +30,12 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    # NOT using full_finetuning=True - matching FP8 for fair comparison
+    full_finetuning=True,
 )
 
 # For full fine-tuning: skip get_peft_model(), just call for_training()
+# Disable gradient checkpointing to match FP8 for fair comparison
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
-
-# Manually unfreeze ALL parameters (same as FP8 script)
-for param in model.parameters():
-    param.requires_grad = True
 
 # Explicitly disable gradient checkpointing
 if hasattr(model, 'gradient_checkpointing_disable'):

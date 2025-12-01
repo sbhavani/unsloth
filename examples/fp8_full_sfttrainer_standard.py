@@ -26,8 +26,8 @@ print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 print("\n[1/4] Setting up FP8...")
 accelerator = setup_fp8_mixed_precision_training()
 
-# Load model
-# NOTE: Can't use full_finetuning=True due to fused CE loss conflict with FP8/TE
+# Load model with full_finetuning=True
+# Fused CE loss is auto-disabled when FP8/TE layers are detected
 print("\n[2/4] Loading model...")
 max_seq_length = 2048  # Standard seq length
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -35,13 +35,10 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
+    full_finetuning=True,  # Now works with FP8!
 )
 
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
-
-# FP8 REQUIRED: Manually unfreeze all parameters (can't use full_finetuning=True)
-for param in model.parameters():
-    param.requires_grad = True
 
 # FP8 REQUIRED: Disable gradient checkpointing (cuBLAS issues on some GPUs)
 if hasattr(model, 'gradient_checkpointing_disable'):
