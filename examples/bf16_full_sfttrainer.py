@@ -108,6 +108,7 @@ trainer = SFTTrainer(
         remove_unused_columns=False,
         dataloader_num_workers=0,
         dataloader_pin_memory=False,
+        torch_compile=True,  # Compile training loop
     ),
 )
 
