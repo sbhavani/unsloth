@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
 FP8 Full Fine-tuning with SFTTrainer - L40 Compatible
+Does NOT use full_finetuning=True (conflicts with FP8 fused CE loss).
+Manually unfreezes all parameters instead.
 
-Uses full_finetuning=True with use_fused_loss=False to avoid FP8/CE loss conflict.
 Uses 3B model (fits in L40 memory without gradient checkpointing).
 """
 import os
@@ -30,7 +31,7 @@ if "L40" not in gpu_name and "Ada" not in gpu_name:
 print("\n[1/4] Setting up FP8...")
 accelerator = setup_fp8_mixed_precision_training()
 
-# Load model with full_finetuning=True AND use_fused_loss=False for FP8 compatibility
+# Load model WITHOUT full_finetuning=True (it conflicts with FP8 fused CE loss)
 print("\n[2/4] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -38,14 +39,16 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    full_finetuning=True,      # Enable full fine-tuning with all Unsloth optimizations
-    use_fused_loss=False,      # Disable fused CE loss for FP8 compatibility
+    # NOT using full_finetuning=True - conflicts with FP8
 )
 
 # Disable gradient checkpointing (required for FP8 on L40 - cuBLAS issues)
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 
-# Explicitly disable gradient checkpointing (workaround for issue #2362)
+# Manually unfreeze ALL parameters for full fine-tuning
+for param in model.parameters():
+    param.requires_grad = True
+
 if hasattr(model, 'gradient_checkpointing_disable'):
     model.gradient_checkpointing_disable()
 model.config.use_cache = True

@@ -336,7 +336,6 @@ class FastBaseModel:
         auto_config = None,
         offload_embedding = False,
         float32_mixed_precision = None,  # Forces float32 mixed precision
-        use_fused_loss = True,  # Use Unsloth's fused CE loss (set False for FP8)
         # vLLM parameters
         fast_inference = False,
         gpu_memory_utilization = 0.5,
@@ -347,11 +346,6 @@ class FastBaseModel:
         unsloth_vllm_standby = False,
         **kwargs,
     ):
-        # Handle use_fused_loss BEFORE any model loading/compilation
-        # Setting this early ensures the compiled forward function doesn't use fused CE loss
-        if not use_fused_loss:
-            os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
-        
         if unsloth_vllm_standby and os.environ.get("UNSLOTH_VLLM_STANDBY", "0") != "1":
             raise RuntimeError(
                 "Unsloth: UNSLOTH_VLLM_STANDBY is True, but UNSLOTH_VLLM_STANDBY is not set to 1!"
