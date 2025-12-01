@@ -55,7 +55,7 @@ trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-# Prepare dataset (notebook pattern)
+# Prepare dataset - must pre-tokenize with fixed padding for FP8 alignment
 print("\n[4/4] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
@@ -70,14 +70,17 @@ alpaca_prompt = """Below is an instruction that describes a task, paired with an
 
 EOS_TOKEN = tokenizer.eos_token
 
-def formatting_prompts_func(examples):
-    texts = []
-    for inst, inp, out in zip(examples["instruction"], examples["input"], examples["output"]):
-        texts.append(alpaca_prompt.format(inst, inp, out) + EOS_TOKEN)
-    return {"text": texts}
+# FP8 requires fixed sequence lengths for dimension alignment
+# Pre-tokenize with padding="max_length" to ensure batch×seq is divisible by 8
+def tokenize_and_format(examples):
+    texts = [alpaca_prompt.format(i, inp, o) + EOS_TOKEN 
+             for i, inp, o in zip(examples["instruction"], examples["input"], examples["output"])]
+    tokenized = tokenizer(texts, truncation=True, padding="max_length", max_length=max_seq_length)
+    tokenized["labels"] = tokenized["input_ids"].copy()
+    return tokenized
 
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
-dataset = dataset.map(formatting_prompts_func, batched=True)
+dataset = dataset.map(tokenize_and_format, batched=True, remove_columns=dataset.column_names)
 
 # Train with SFTTrainer (notebook pattern)
 print("\nStarting training...")
@@ -102,10 +105,8 @@ trainer = SFTTrainer(
         output_dir="outputs",
         report_to="none",
         bf16=True,
-        # SFT-specific (TRL 0.24.0)
-        dataset_text_field="text",
-        max_length=max_seq_length,
-        packing=False,
+        remove_unused_columns=False,
+        # Skip dataset_text_field - data is pre-tokenized for FP8 alignment
     ),
 )
 
