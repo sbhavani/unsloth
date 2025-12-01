@@ -112,15 +112,19 @@ trainer = SFTTrainer(
         warmup_steps=5,
         max_steps=60,
         learning_rate=2e-5,
-        logging_steps=60,  # Log only at end to reduce overhead
+        logging_steps=60,
         optim="adamw_8bit",
-        weight_decay=0.01,
-        lr_scheduler_type="linear",
+        weight_decay=0.0,  # Disable weight decay
+        lr_scheduler_type="constant",  # Simplest scheduler
+        max_grad_norm=0.0,  # Disable gradient clipping
         seed=3407,
         output_dir="outputs",
         report_to="none",
+        save_strategy="no",  # No checkpointing
         bf16=True,
         remove_unused_columns=False,
+        dataloader_num_workers=0,  # Simpler data loading
+        dataloader_pin_memory=False,
     ),
 )
 
