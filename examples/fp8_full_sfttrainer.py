@@ -38,6 +38,12 @@ model, tokenizer = FastLanguageModel.from_pretrained(
 
 # For full fine-tuning: skip get_peft_model(), just call for_training()
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
+
+# Explicitly disable gradient checkpointing on model (Unsloth may enable it)
+if hasattr(model, 'gradient_checkpointing_disable'):
+    model.gradient_checkpointing_disable()
+model.config.use_cache = True  # Enable cache when not using GC
+
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
