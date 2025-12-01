@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-BF16 Full Fine-tuning with Trainer (baseline comparison)
-Matches FP8 settings for fair comparison
+BF16 Full Fine-tuning with SFTTrainer (baseline comparison)
+Matches Unsloth notebook pattern as closely as possible
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
@@ -10,9 +10,10 @@ os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Match FP8 setting
 import torch
 from unsloth import FastLanguageModel
 from datasets import load_dataset
+from trl import SFTTrainer, SFTConfig
 
 print("=" * 80)
-print("BF16 Full Fine-tuning + Trainer (Llama-3.2-3B)")
+print("BF16 Full Fine-tuning + SFTTrainer (Llama-3.2-3B)")
 print("=" * 80)
 
 # Check GPU
@@ -21,7 +22,7 @@ gpu_cap = torch.cuda.get_device_capability(0)
 print(f"\nGPU: {gpu_name}")
 print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 
-# Load model with Unsloth (same as FP8)
+# Load model with Unsloth (same as notebook)
 print("\n[1/3] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -30,6 +31,8 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     dtype=torch.bfloat16,
     load_in_4bit=False,
 )
+
+# For full fine-tuning: skip get_peft_model(), just call for_training()
 # Disable gradient checkpointing to match FP8 (fair comparison)
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 tokenizer.pad_token = tokenizer.eos_token
@@ -39,7 +42,7 @@ trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-# Prepare dataset (same as FP8)
+# Prepare dataset (notebook pattern)
 print("\n[2/3] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
@@ -54,39 +57,27 @@ alpaca_prompt = """Below is an instruction that describes a task, paired with an
 
 EOS_TOKEN = tokenizer.eos_token
 
-# Pre-tokenize with fixed padding (same as FP8)
-def tokenize_fn(examples):
-    texts = [alpaca_prompt.format(i, inp, o) + EOS_TOKEN 
-             for i, inp, o in zip(examples["instruction"], examples["input"], examples["output"])]
-    return tokenizer(
-        texts, 
-        truncation=True, 
-        padding="max_length",
-        max_length=max_seq_length, 
-        return_tensors=None
-    )
+def formatting_prompts_func(examples):
+    texts = []
+    for inst, inp, out in zip(examples["instruction"], examples["input"], examples["output"]):
+        texts.append(alpaca_prompt.format(inst, inp, out) + EOS_TOKEN)
+    return {"text": texts}
 
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
-dataset = dataset.map(tokenize_fn, batched=True, remove_columns=dataset.column_names)
+dataset = dataset.map(formatting_prompts_func, batched=True)
 
-def add_labels(examples):
-    examples["labels"] = examples["input_ids"].copy()
-    return examples
-dataset = dataset.map(add_labels, batched=True)
-
-# Train with HF Trainer (same as FP8)
+# Train with SFTTrainer (notebook pattern)
 print("\n[3/3] Training...")
 print("=" * 80)
 
-from transformers import Trainer, TrainingArguments, DataCollatorForLanguageModeling
-
-data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
-
-trainer = Trainer(
+trainer = SFTTrainer(
     model=model,
-    args=TrainingArguments(
+    processing_class=tokenizer,
+    train_dataset=dataset,
+    args=SFTConfig(
         per_device_train_batch_size=4,  # Same as FP8
         gradient_accumulation_steps=4,  # Effective batch = 16
+        gradient_checkpointing=False,   # Match FP8 for fair comparison
         warmup_steps=5,
         max_steps=60,
         learning_rate=2e-5,
@@ -98,10 +89,11 @@ trainer = Trainer(
         output_dir="outputs",
         report_to="none",
         bf16=True,
-        remove_unused_columns=False,
+        # SFT-specific (TRL 0.24.0)
+        dataset_text_field="text",
+        max_length=max_seq_length,
+        packing=False,
     ),
-    train_dataset=dataset,
-    data_collator=data_collator,
 )
 
 trainer_stats = trainer.train()
