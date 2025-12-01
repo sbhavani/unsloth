@@ -48,6 +48,12 @@ trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
+# Debug: show frozen parameters
+print("  Frozen parameters:")
+for name, param in model.named_parameters():
+    if not param.requires_grad:
+        print(f"    - {name}: {param.numel():,} params")
+
 # Prepare dataset (notebook pattern)
 print("\n[2/3] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
