@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 FP8 Full Fine-tuning with SFTTrainer
-Uses full_finetuning=True - fused CE loss is auto-disabled when FP8/TE layers detected.
+Does NOT use full_finetuning=True (conflicts with FP8 fused CE loss).
+Manually unfreezes all parameters instead.
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
 import torch
-from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training, prepare_model_for_fp8
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
@@ -25,8 +26,7 @@ print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 print("\n[1/4] Setting up FP8...")
 accelerator = setup_fp8_mixed_precision_training()
 
-# Load model with full_finetuning=True
-# Fused CE loss is auto-disabled when FP8/TE layers are detected
+# Load model WITHOUT full_finetuning=True (it conflicts with FP8 fused CE loss)
 print("\n[2/4] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -34,14 +34,17 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    full_finetuning=True,  # Now works with FP8!
+    # NOT using full_finetuning=True - conflicts with FP8
 )
 
-# For full fine-tuning: skip get_peft_model(), just call for_training()
-# Note: Gradient checkpointing disabled for FP8 (cuBLAS issues on some GPUs)
+# Disable gradient checkpointing (required for FP8 - cuBLAS issues on some GPUs)
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 
-# Explicitly disable gradient checkpointing (Unsloth may enable it)
+# Manually unfreeze ALL parameters for full fine-tuning
+for param in model.parameters():
+    param.requires_grad = True
+
+# Explicitly disable gradient checkpointing (workaround for issue #2362)
 if hasattr(model, 'gradient_checkpointing_disable'):
     model.gradient_checkpointing_disable()
 model.config.use_cache = True
@@ -53,11 +56,9 @@ trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-# Prepare with FP8
+# Prepare with FP8 (using helper - no dummy optimizer needed)
 print("\n[3/4] Preparing with FP8...")
-_dummy_opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
-model, _ = accelerator.prepare(model, _dummy_opt)
-del _dummy_opt
+model = prepare_model_for_fp8(accelerator, model)
 
 import transformer_engine.pytorch as te
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))

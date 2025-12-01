@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
 BF16 Full Fine-tuning with SFTTrainer (baseline comparison)
-Matches Unsloth notebook pattern as closely as possible
+Does NOT use full_finetuning=True to match FP8 script for fair comparison.
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
-os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Match FP8 setting
 
 import torch
 from unsloth import FastLanguageModel
@@ -22,7 +21,7 @@ gpu_cap = torch.cuda.get_device_capability(0)
 print(f"\nGPU: {gpu_name}")
 print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 
-# Load model with full_finetuning=True
+# Load model WITHOUT full_finetuning=True (to match FP8 script for fair comparison)
 print("\n[1/3] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -30,14 +29,17 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    full_finetuning=True,
+    # NOT using full_finetuning=True - to match FP8 script
 )
 
-# For full fine-tuning: skip get_peft_model(), just call for_training()
 # Disable gradient checkpointing to match FP8 for fair comparison
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 
-# Explicitly disable gradient checkpointing
+# Manually unfreeze ALL parameters for full fine-tuning
+for param in model.parameters():
+    param.requires_grad = True
+
+# Explicitly disable gradient checkpointing (workaround for issue #2362)
 if hasattr(model, 'gradient_checkpointing_disable'):
     model.gradient_checkpointing_disable()
 model.config.use_cache = True
