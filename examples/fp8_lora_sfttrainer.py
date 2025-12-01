@@ -9,11 +9,20 @@ import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Required for FP8 compatibility
 
+# Workaround for accelerate/TE compatibility issue
+# See: https://github.com/huggingface/accelerate/pull/3852
+import transformer_engine.pytorch as te
+if not hasattr(te, 'fp8'):
+    class _FakeFP8:
+        @staticmethod
+        def check_mxfp8_support():
+            return False, "MXFP8 not available"
+    te.fp8 = _FakeFP8()
+
 import torch
 from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
-import transformer_engine.pytorch as te
 
 print("=" * 80)
 print("FP8 + LoRA + SFTTrainer (notebook pattern)")
