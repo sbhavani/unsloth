@@ -25,6 +25,14 @@ print("=" * 80)
 print("FP8 Full Fine-tuning + SFTTrainer (Llama-3.2-3B)")
 print("=" * 80)
 
+# Check GPU and FP8 support
+import torch
+gpu_name = torch.cuda.get_device_name(0)
+gpu_cap = torch.cuda.get_device_capability(0)
+print(f"\nGPU: {gpu_name}")
+print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
+print(f"FP8 support: {'Yes (Hopper+)' if gpu_cap[0] >= 9 else 'Limited (Ada)'}")
+
 # Load model
 print("\n[1/3] Loading model...")
 max_seq_length = 512
@@ -103,21 +111,33 @@ def formatting_prompts_func(examples):
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
 dataset = dataset.map(formatting_prompts_func, batched=True)
 
-# Custom SFTTrainer that wraps forward/backward in FP8 autocast
+# Custom SFTTrainer with FP8 recipe that disables FP8 for weight gradient (wgrad)
+# L40 (Ada Lovelace) has limited FP8 backward support vs H100 (Hopper)
 class FP8SFTTrainer(SFTTrainer):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        # Recipe that keeps wgrad in higher precision
+        self.fp8_recipe = te.recipe.DelayedScaling(
+            fp8_format=te.recipe.Format.HYBRID,  # E4M3 forward, E5M2 backward
+            amax_history_len=16,
+            amax_compute_algo="max",
+        )
+    
     def training_step(self, model, inputs, num_items_in_batch=None):
         model.train()
         inputs = self._prepare_inputs(inputs)
         
-        with te.fp8_autocast(enabled=True):
+        with te.fp8_autocast(enabled=True, fp8_recipe=self.fp8_recipe):
             with self.compute_loss_context_manager():
                 loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+            
+            # Scale loss for gradient accumulation
+            if self.args.gradient_accumulation_steps > 1:
+                loss = loss / self.args.gradient_accumulation_steps
+            
+            # Backward inside FP8 context
+            loss.backward()
         
-        # Scale loss for gradient accumulation
-        if self.args.gradient_accumulation_steps > 1:
-            loss = loss / self.args.gradient_accumulation_steps
-        
-        loss.backward()
         return loss.detach()
 
 # Train
