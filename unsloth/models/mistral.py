@@ -319,14 +319,14 @@ def MistralForCausalLM_fast_forward(
     else:
         RETURN_LOGITS = os.environ.get("UNSLOTH_RETURN_LOGITS", "0") == "1"
         
-        # Auto-detect FP8/Transformer Engine layers - fused CE loss is incompatible
+        # Check for FP8 mode flag (set by accelerator.prepare or user)
         if not RETURN_LOGITS:
-            try:
-                import transformer_engine.pytorch as te
-                if any(isinstance(m, te.Linear) for m in self.modules()):
-                    RETURN_LOGITS = True  # Skip fused loss for FP8
-            except ImportError:
-                pass
+            # Check model attribute (set after FP8 conversion)
+            if getattr(self, '_unsloth_fp8_mode', False):
+                RETURN_LOGITS = True
+            # Also check config (alternative way to signal FP8)
+            elif getattr(self.config, '_unsloth_fp8_mode', False):
+                RETURN_LOGITS = True
         
         # < 1024 Normal Unsloth uses less VRAM!
         if bsz * q_len <= 1024 and not RETURN_LOGITS:

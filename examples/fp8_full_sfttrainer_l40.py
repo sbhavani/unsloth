@@ -6,6 +6,14 @@ Tests the auto-detection fix for FP8/TE layers with fused CE loss.
 Uses 3B model (fits in L40 memory without gradient checkpointing).
 """
 import os
+import shutil
+
+# Clear compiled cache to ensure fresh compilation with FP8 fix
+cache_path = "./unsloth_compiled_cache"
+if os.path.exists(cache_path):
+    shutil.rmtree(cache_path)
+    print(f"Cleared {cache_path}")
+
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
 
 import torch
@@ -74,6 +82,17 @@ del _dummy_opt
 import transformer_engine.pytorch as te
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear")
+
+# CRITICAL: Set FP8 mode flag to disable fused CE loss
+# This must be done AFTER accelerator.prepare() converts layers to TE
+# Find the base model and set the flag
+base_model = model
+while hasattr(base_model, 'module'):
+    base_model = base_model.module
+while hasattr(base_model, 'model') and not hasattr(base_model, '_unsloth_fp8_mode'):
+    base_model = base_model.model
+base_model._unsloth_fp8_mode = True
+print("  ✓ Set _unsloth_fp8_mode=True to disable fused CE loss")
 
 if te_count == 0:
     print("  ERROR: No TE layers found! FP8 conversion may have failed.")
