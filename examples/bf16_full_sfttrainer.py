@@ -30,8 +30,8 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     dtype=torch.bfloat16,
     load_in_4bit=False,
 )
-# BF16 CAN use gradient checkpointing (unlike FP8 on L40)
-model = FastLanguageModel.for_training(model, use_gradient_checkpointing=True)
+# Disable gradient checkpointing to match FP8 (fair comparison)
+model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
