@@ -2,15 +2,12 @@
 """
 FP8 Full Fine-tuning with SFTTrainer
 All parameters trainable (no LoRA)
-NOTE: Does NOT use full_finetuning=True to avoid Unsloth optimizations 
-that conflict with TE FP8 (fused CE loss, smart gradient offload)
+Uses custom trainer to wrap forward/backward in te.fp8_autocast()
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
-# Disable Unsloth's special optimizations that conflict with FP8
 os.environ["UNSLOTH_RETURN_LOGITS"] = "0"
 
-# Workaround for accelerate/TE compatibility issue
 import transformer_engine.pytorch as te
 if not hasattr(te, 'fp8'):
     class _FakeFP8:
@@ -21,8 +18,6 @@ if not hasattr(te, 'fp8'):
 
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from accelerate import Accelerator
-from accelerate.utils import FP8RecipeKwargs
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
@@ -30,14 +25,8 @@ print("=" * 80)
 print("FP8 Full Fine-tuning + SFTTrainer (Llama-3.2-3B)")
 print("=" * 80)
 
-# Setup FP8 accelerator directly (not via Unsloth)
-print("\n[1/4] Setting up FP8 accelerator...")
-fp8_recipe = FP8RecipeKwargs(backend="te")
-accelerator = Accelerator(mixed_precision="fp8", kwargs_handlers=[fp8_recipe])
-print(f"  Device: {accelerator.device}")
-
-# Load model directly with HF (avoid Unsloth's special optimizations)
-print("\n[2/4] Loading model...")
+# Load model
+print("\n[1/3] Loading model...")
 max_seq_length = 512
 model_name = "unsloth/Llama-3.2-3B"
 
@@ -48,31 +37,50 @@ model = AutoModelForCausalLM.from_pretrained(
     attn_implementation="flash_attention_2",
 )
 
-# NOTE: Gradient checkpointing conflicts with TE FP8 backward pass
-# Disabled for FP8 - uses more memory but avoids cuBLAS GEMM errors
-# model.gradient_checkpointing_enable(gradient_checkpointing_kwargs={"use_reentrant": False})
-
 tokenizer = AutoTokenizer.from_pretrained(model_name)
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
-# Verify all params trainable
-trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-total = sum(p.numel() for p in model.parameters())
-print(f"  Model loaded: {total:,} params")
-print(f"  Trainable: {trainable:,} ({100*trainable/total:.2f}%)")
+# Convert linear layers to TE (without accelerator.prepare)
+print("\n[2/3] Converting to FP8 (TE layers)...")
+def convert_to_te_linear(model):
+    """Convert nn.Linear layers to te.Linear for FP8 support"""
+    te_count = 0
+    for name, module in model.named_modules():
+        if isinstance(module, torch.nn.Linear) and not isinstance(module, te.Linear):
+            # Get parent module
+            parts = name.split('.')
+            parent = model
+            for part in parts[:-1]:
+                parent = getattr(parent, part)
+            
+            # Create TE linear with same config
+            te_linear = te.Linear(
+                module.in_features,
+                module.out_features,
+                bias=module.bias is not None,
+                params_dtype=module.weight.dtype,
+            )
+            # Copy weights
+            te_linear.weight.data.copy_(module.weight.data)
+            if module.bias is not None:
+                te_linear.bias.data.copy_(module.bias.data)
+            te_linear.to(module.weight.device)
+            
+            # Replace
+            setattr(parent, parts[-1], te_linear)
+            te_count += 1
+    return te_count
 
-# Prepare model with FP8
-print("\n[3/4] Preparing model with FP8...")
-import bitsandbytes as bnb
-optimizer = bnb.optim.AdamW8bit(model.parameters(), lr=2e-5)
-model, optimizer = accelerator.prepare(model, optimizer)
-
-te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
+te_count = convert_to_te_linear(model)
 print(f"  Converted {te_count} layers to te.Linear")
 
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+
 # Prepare dataset
-print("\n[4/4] Preparing dataset...")
+print("\n[3/3] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
 ### Instruction:
@@ -95,32 +103,48 @@ def formatting_prompts_func(examples):
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
 dataset = dataset.map(formatting_prompts_func, batched=True)
 
-# Train with SFTTrainer
+# Custom SFTTrainer that wraps forward/backward in FP8 autocast
+class FP8SFTTrainer(SFTTrainer):
+    def training_step(self, model, inputs, num_items_in_batch=None):
+        model.train()
+        inputs = self._prepare_inputs(inputs)
+        
+        with te.fp8_autocast(enabled=True):
+            with self.compute_loss_context_manager():
+                loss = self.compute_loss(model, inputs, num_items_in_batch=num_items_in_batch)
+        
+        # Scale loss for gradient accumulation
+        if self.args.gradient_accumulation_steps > 1:
+            loss = loss / self.args.gradient_accumulation_steps
+        
+        loss.backward()
+        return loss.detach()
+
+# Train
 print("\nStarting training...")
 print("=" * 80)
 
-trainer = SFTTrainer(
+trainer = FP8SFTTrainer(
     model=model,
     processing_class=tokenizer,
     train_dataset=dataset,
     args=SFTConfig(
         per_device_train_batch_size=8,  # Must be >= 8 for FP8 alignment
         gradient_accumulation_steps=2,  # Effective batch = 16
-        gradient_checkpointing=False,  # Conflicts with TE FP8 backward
+        gradient_checkpointing=False,
         warmup_steps=5,
         max_steps=60,
-        learning_rate=2e-5,  # Lower LR for full FT
+        learning_rate=2e-5,
         logging_steps=10,
-        optim="adamw_torch",  # Standard optimizer (already prepared)
+        optim="adamw_8bit",
         weight_decay=0.01,
         lr_scheduler_type="linear",
         seed=3407,
         output_dir="outputs",
         report_to="none",
         bf16=True,
-        # SFT-specific args (TRL 0.24.0)
         dataset_text_field="text",
-        max_length=max_seq_length,  # NOT max_seq_length
+        max_length=max_seq_length,
         packing=False,
     ),
 )
