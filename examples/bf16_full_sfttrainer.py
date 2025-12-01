@@ -30,6 +30,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
+    full_finetuning=True,  # Required for proper full fine-tuning!
 )
 
 # For full fine-tuning: skip get_peft_model(), just call for_training()
@@ -48,20 +49,12 @@ trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-# Debug: show frozen parameters
-print("  Frozen parameters:")
-for name, param in model.named_parameters():
-    if not param.requires_grad:
-        print(f"    - {name}: {param.numel():,} params")
-
-# FIX: Unfreeze all parameters for full fine-tuning
-print("  Unfreezing all parameters for full fine-tuning...")
-for param in model.parameters():
-    param.requires_grad = True
-
-trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
-total = sum(p.numel() for p in model.parameters())
-print(f"  After unfreeze: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+# Verify full fine-tuning is enabled
+frozen = [(n, p.numel()) for n, p in model.named_parameters() if not p.requires_grad]
+if frozen:
+    print(f"  WARNING: {len(frozen)} frozen parameters:")
+    for name, count in frozen:
+        print(f"    - {name}: {count:,} params")
 
 # Prepare dataset (notebook pattern)
 print("\n[2/3] Preparing dataset...")

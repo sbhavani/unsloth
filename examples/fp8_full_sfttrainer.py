@@ -34,6 +34,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
+    full_finetuning=True,  # Required for proper full fine-tuning!
 )
 
 # For full fine-tuning: skip get_peft_model(), just call for_training()
@@ -47,11 +48,15 @@ model.config.use_cache = True  # Enable cache when not using GC
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
 
-# FIX: Unfreeze all parameters BEFORE FP8 preparation
+# Prepare with FP8
 print("\n[3/4] Preparing with FP8...")
-print("  Unfreezing all parameters for full fine-tuning...")
-for param in model.parameters():
-    param.requires_grad = True
+
+# Verify full fine-tuning is enabled before FP8 conversion
+frozen_before = [(n, p.numel()) for n, p in model.named_parameters() if not p.requires_grad]
+if frozen_before:
+    print(f"  WARNING: {len(frozen_before)} frozen params before FP8, unfreezing...")
+    for param in model.parameters():
+        param.requires_grad = True
 
 _dummy_opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
 model, _ = accelerator.prepare(model, _dummy_opt)
