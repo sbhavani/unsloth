@@ -2,23 +2,29 @@
 """
 FP8 + LoRA + SFTTrainer (matches notebook pattern exactly)
 
-Run with: accelerate launch --mixed_precision fp8 examples/fp8_lora_sfttrainer.py
+Run with: python examples/fp8_lora_sfttrainer.py
 Compare with: python examples/bf16_typical_lora.py
 """
 import os
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
+os.environ["UNSLOTH_RETURN_LOGITS"] = "1"  # Required for FP8 compatibility
 
 import torch
-from unsloth import FastLanguageModel
+from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
 from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
+import transformer_engine.pytorch as te
 
 print("=" * 80)
 print("FP8 + LoRA + SFTTrainer (notebook pattern)")
 print("=" * 80)
 
+# Setup FP8 FIRST
+print("\n[1/5] Setting up FP8...")
+accelerator = setup_fp8_mixed_precision_training()
+
 # Load model - same as notebook
-print("\n[1/4] Loading model...")
+print("\n[2/5] Loading model...")
 max_seq_length = 2048
 
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -29,7 +35,7 @@ model, tokenizer = FastLanguageModel.from_pretrained(
 )
 
 # Add LoRA adapters - same as notebook
-print("\n[2/4] Adding LoRA adapters...")
+print("\n[3/5] Adding LoRA adapters...")
 model = FastLanguageModel.get_peft_model(
     model,
     r=16,
@@ -44,8 +50,20 @@ model = FastLanguageModel.get_peft_model(
 
 tokenizer.pad_token = tokenizer.eos_token
 
+# Prepare model with FP8
+print("\n[4/5] Preparing model with FP8...")
+model = accelerator.prepare(model)
+
+te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
+print(f"  Converted {te_count} layers to te.Linear")
+
+if te_count == 0:
+    print("  ⚠️  WARNING: No te.Linear layers found - FP8 may not be active!")
+else:
+    print(f"  ✅ FP8 active with {te_count} TE layers")
+
 # Prepare dataset - same as notebook
-print("\n[3/4] Preparing dataset...")
+print("\n[5/5] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
 ### Instruction:
@@ -69,7 +87,7 @@ dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
 dataset = dataset.map(formatting_prompts_func, batched=True)
 
 # Train with SFTTrainer - identical to notebook
-print("\n[4/4] Starting training...")
+print("\nStarting training...")
 print("=" * 80)
 
 trainer = SFTTrainer(
