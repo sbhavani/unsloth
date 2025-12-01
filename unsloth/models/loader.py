@@ -133,6 +133,7 @@ class FastLanguageModel(FastLlamaModel):
         use_exact_model_name = False,
         offload_embedding = False,
         float32_mixed_precision = None,  # Forces float32 mixed precision
+        use_fused_loss = True,  # Use Unsloth's fused CE loss (set False for FP8)
         fast_inference = False,  # uses vLLM
         gpu_memory_utilization = 0.5,
         float8_kv_cache = False,
@@ -175,6 +176,7 @@ class FastLanguageModel(FastLlamaModel):
                 use_exact_model_name = use_exact_model_name,
                 offload_embedding = offload_embedding,
                 float32_mixed_precision = float32_mixed_precision,
+                use_fused_loss = use_fused_loss,
                 # Pass vLLM/inference parameters
                 fast_inference = fast_inference,
                 gpu_memory_utilization = gpu_memory_utilization,
@@ -626,6 +628,7 @@ class FastModel(FastBaseModel):
         unsloth_force_compile = False,
         offload_embedding = False,
         float32_mixed_precision = None,  # Forces float32 mixed precision
+        use_fused_loss = True,  # Use Unsloth's fused CE loss (set False for FP8)
         # Add the missing vLLM/inference parameters
         fast_inference = False,  # uses vLLM
         gpu_memory_utilization = 0.5,
@@ -1084,6 +1087,7 @@ class FastModel(FastBaseModel):
             auto_config = model_config,
             offload_embedding = offload_embedding,
             float32_mixed_precision = float32_mixed_precision,
+            use_fused_loss = use_fused_loss,
             # Pass vLLM/inference parameters
             fast_inference = fast_inference,
             gpu_memory_utilization = gpu_memory_utilization,
