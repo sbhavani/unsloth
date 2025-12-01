@@ -71,8 +71,8 @@ trainer = SFTTrainer(
     max_seq_length=max_seq_length,
     packing=False,
     args=SFTConfig(
-        per_device_train_batch_size=1,  # Minimal batch for full FT memory
-        gradient_accumulation_steps=16,  # Effective batch = 16
+        per_device_train_batch_size=8,  # Match FP8 for fair comparison
+        gradient_accumulation_steps=2,  # Effective batch = 16
         warmup_steps=5,
         max_steps=60,
         learning_rate=2e-5,  # Lower LR for full FT
