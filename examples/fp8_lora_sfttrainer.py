@@ -72,6 +72,16 @@ if te_count == 0:
 else:
     print(f"  FP8 active with {te_count} TE layers")
 
+# Re-freeze base model params (accelerator.prepare may have unfrozen them)
+# Only LoRA params should be trainable
+for name, param in model.named_parameters():
+    if "lora_" not in name.lower():
+        param.requires_grad = False
+
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+total = sum(p.numel() for p in model.parameters())
+print(f"  Trainable params: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
+
 # Prepare dataset - same as notebook
 print("\n[5/5] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
