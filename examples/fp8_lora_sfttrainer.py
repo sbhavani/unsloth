@@ -50,17 +50,18 @@ model = FastLanguageModel.get_peft_model(
 
 tokenizer.pad_token = tokenizer.eos_token
 
-# Prepare model with FP8
+# Prepare model with FP8 (must pass model AND optimizer together for TE)
 print("\n[4/5] Preparing model with FP8...")
-model = accelerator.prepare(model)
+optimizer = torch.optim.AdamW(model.parameters(), lr=2e-4)
+model, optimizer = accelerator.prepare(model, optimizer)
 
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear")
 
 if te_count == 0:
-    print("  ⚠️  WARNING: No te.Linear layers found - FP8 may not be active!")
+    print("  WARNING: No te.Linear layers found - FP8 may not be active!")
 else:
-    print(f"  ✅ FP8 active with {te_count} TE layers")
+    print(f"  FP8 active with {te_count} TE layers")
 
 # Prepare dataset - same as notebook
 print("\n[5/5] Preparing dataset...")
