@@ -1,28 +1,13 @@
 #!/usr/bin/env python3
 """
 FP8 Full Fine-tuning with SFTTrainer - L40 Compatible
-Uses full_finetuning=True with UNSLOTH_RETURN_LOGITS=1 to disable fused CE loss.
+Does NOT use full_finetuning=True (conflicts with FP8 fused CE loss).
+Manually unfreezes all parameters instead.
 
 Uses 3B model (fits in L40 memory without gradient checkpointing).
 """
 import os
-import shutil
-
-# CRITICAL: Set env var BEFORE importing unsloth to disable fused CE loss at compile time
-os.environ["UNSLOTH_RETURN_LOGITS"] = "1"
 os.environ["HF_DATASETS_NUM_PROC"] = "1"
-
-# Clear compiled cache to ensure fresh compilation
-cache_path = os.path.join(os.path.dirname(__file__), "..", "unsloth_compiled_cache")
-cache_path = os.path.abspath(cache_path)
-if os.path.exists(cache_path):
-    shutil.rmtree(cache_path)
-    print(f"Cleared {cache_path}")
-else:
-    # Also try current directory
-    if os.path.exists("./unsloth_compiled_cache"):
-        shutil.rmtree("./unsloth_compiled_cache")
-        print("Cleared ./unsloth_compiled_cache")
 
 import torch
 from unsloth import FastLanguageModel, setup_fp8_mixed_precision_training
@@ -30,9 +15,7 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
 print("=" * 80)
-print("FP8 Full Fine-tuning + SFTTrainer (Llama-3.2-3B) - L40 Test")
-print("=" * 80)
-print("Testing: full_finetuning=True with FP8 auto-detection fix")
+print("FP8 Full Fine-tuning + SFTTrainer (Llama-3.2-3B) - L40")
 print("=" * 80)
 
 # Check GPU
@@ -48,20 +31,23 @@ if "L40" not in gpu_name and "Ada" not in gpu_name:
 print("\n[1/4] Setting up FP8...")
 accelerator = setup_fp8_mixed_precision_training()
 
-# Load model with full_finetuning=True
-# The fix should auto-detect FP8/TE layers and skip fused CE loss
-print("\n[2/4] Loading model with full_finetuning=True...")
+# Load model WITHOUT full_finetuning=True (it conflicts with FP8 fused CE loss)
+print("\n[2/4] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="unsloth/Llama-3.2-3B",  # 3B fits on L40 without grad ckpt
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    full_finetuning=True,  # Should work with FP8 now!
+    # NOT using full_finetuning=True - conflicts with FP8
 )
 
 # Disable gradient checkpointing (required for FP8 on L40 - cuBLAS issues)
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
+
+# Manually unfreeze ALL parameters for full fine-tuning
+for param in model.parameters():
+    param.requires_grad = True
 
 if hasattr(model, 'gradient_checkpointing_disable'):
     model.gradient_checkpointing_disable()
@@ -74,13 +60,6 @@ trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-if trainable == 0:
-    print("  ERROR: No trainable parameters! full_finetuning may not be working.")
-elif trainable < total * 0.9:
-    print(f"  WARNING: Only {100*trainable/total:.1f}% trainable. Expected ~100%.")
-else:
-    print("  ✓ Full fine-tuning enabled (100% trainable)")
-
 # Prepare with FP8
 print("\n[3/4] Preparing with FP8...")
 _dummy_opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
@@ -90,7 +69,6 @@ del _dummy_opt
 import transformer_engine.pytorch as te
 te_count = sum(1 for m in model.modules() if isinstance(m, te.Linear))
 print(f"  Converted {te_count} layers to te.Linear")
-print("  ✓ UNSLOTH_RETURN_LOGITS=1 disables fused CE loss (set before import)")
 
 if te_count == 0:
     print("  ERROR: No TE layers found! FP8 conversion may have failed.")
@@ -129,7 +107,6 @@ dataset = dataset.map(tokenize_and_format, batched=True, remove_columns=dataset.
 # Train with SFTTrainer
 print("\n" + "=" * 80)
 print("Starting training...")
-print("If this works without errors, the FP8 auto-detection fix is successful!")
 print("=" * 80)
 
 trainer = SFTTrainer(
@@ -172,8 +149,7 @@ used_memory = round(torch.cuda.max_memory_reserved() / 1024 / 1024 / 1024, 3)
 print(f"Peak memory: {used_memory} GB")
 
 print("\n" + "=" * 80)
-print("FP8 + full_finetuning=True VERIFIED!")
-print("- UNSLOTH_RETURN_LOGITS=1 disabled fused CE loss")
-print("- full_finetuning=True works with FP8")
-print("- Gradient offloading enabled ('smartly offload gradients')")
+print("FP8 Full Fine-tuning Complete!")
+print("- Manual param unfreezing (full_finetuning=True conflicts with FP8)")
+print("- No gradient checkpointing (cuBLAS issues on L40)")
 print("=" * 80)
