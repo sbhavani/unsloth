@@ -22,7 +22,9 @@ gpu_cap = torch.cuda.get_device_capability(0)
 print(f"\nGPU: {gpu_name}")
 print(f"Compute capability: {gpu_cap[0]}.{gpu_cap[1]}")
 
-# Load model with Unsloth (same as notebook)
+# Load model with Unsloth
+# NOTE: NOT using full_finetuning=True for fair comparison with FP8
+# (FP8 can't use it due to fused CE loss conflict with Transformer Engine)
 print("\n[1/3] Loading model...")
 max_seq_length = 512
 model, tokenizer = FastLanguageModel.from_pretrained(
@@ -30,17 +32,20 @@ model, tokenizer = FastLanguageModel.from_pretrained(
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    full_finetuning=True,  # Required for proper full fine-tuning!
+    # NOT using full_finetuning=True - matching FP8 for fair comparison
 )
 
 # For full fine-tuning: skip get_peft_model(), just call for_training()
-# Disable gradient checkpointing to match FP8 (fair comparison)
 model = FastLanguageModel.for_training(model, use_gradient_checkpointing=False)
 
-# Explicitly disable gradient checkpointing on model (Unsloth may enable it)
+# Manually unfreeze ALL parameters (same as FP8 script)
+for param in model.parameters():
+    param.requires_grad = True
+
+# Explicitly disable gradient checkpointing
 if hasattr(model, 'gradient_checkpointing_disable'):
     model.gradient_checkpointing_disable()
-model.config.use_cache = True  # Enable cache when not using GC
+model.config.use_cache = True
 
 tokenizer.pad_token = tokenizer.eos_token
 tokenizer.padding_side = "right"
@@ -49,14 +54,7 @@ trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 total = sum(p.numel() for p in model.parameters())
 print(f"  Trainable: {trainable:,} / {total:,} ({100*trainable/total:.2f}%)")
 
-# Verify full fine-tuning is enabled
-frozen = [(n, p.numel()) for n, p in model.named_parameters() if not p.requires_grad]
-if frozen:
-    print(f"  WARNING: {len(frozen)} frozen parameters:")
-    for name, count in frozen:
-        print(f"    - {name}: {count:,} params")
-
-# Prepare dataset (notebook pattern)
+# Prepare dataset - pre-tokenize to match FP8 script exactly
 print("\n[2/3] Preparing dataset...")
 alpaca_prompt = """Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
@@ -71,14 +69,16 @@ alpaca_prompt = """Below is an instruction that describes a task, paired with an
 
 EOS_TOKEN = tokenizer.eos_token
 
-def formatting_prompts_func(examples):
-    texts = []
-    for inst, inp, out in zip(examples["instruction"], examples["input"], examples["output"]):
-        texts.append(alpaca_prompt.format(inst, inp, out) + EOS_TOKEN)
-    return {"text": texts}
+# Pre-tokenize with fixed padding (same as FP8 script for fair comparison)
+def tokenize_and_format(examples):
+    texts = [alpaca_prompt.format(i, inp, o) + EOS_TOKEN 
+             for i, inp, o in zip(examples["instruction"], examples["input"], examples["output"])]
+    tokenized = tokenizer(texts, truncation=True, padding="max_length", max_length=max_seq_length)
+    tokenized["labels"] = tokenized["input_ids"].copy()
+    return tokenized
 
 dataset = load_dataset("yahma/alpaca-cleaned", split="train[:1000]")
-dataset = dataset.map(formatting_prompts_func, batched=True)
+dataset = dataset.map(tokenize_and_format, batched=True, remove_columns=dataset.column_names)
 
 # Train with SFTTrainer (notebook pattern)
 print("\n[3/3] Training...")
@@ -103,10 +103,7 @@ trainer = SFTTrainer(
         output_dir="outputs",
         report_to="none",
         bf16=True,
-        # SFT-specific (TRL 0.24.0)
-        dataset_text_field="text",
-        max_length=max_seq_length,
-        packing=False,
+        remove_unused_columns=False,  # Pre-tokenized data
     ),
 )
 
