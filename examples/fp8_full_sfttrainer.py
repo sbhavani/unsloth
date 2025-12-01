@@ -29,12 +29,15 @@ accelerator = setup_fp8_mixed_precision_training()
 # Load model with Unsloth (same as notebook)
 print("\n[2/4] Loading model...")
 max_seq_length = 512
+# NOTE: For FP8, we can't use full_finetuning=True because it enables
+# Unsloth's fused CE loss which conflicts with TE FP8 tensors.
+# Instead, we manually unfreeze all parameters.
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name="unsloth/Llama-3.2-3B",
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
-    full_finetuning=True,  # Required for proper full fine-tuning!
+    # full_finetuning=True,  # Can't use with FP8 - conflicts with fused CE loss
 )
 
 # For full fine-tuning: skip get_peft_model(), just call for_training()
@@ -51,12 +54,11 @@ tokenizer.padding_side = "right"
 # Prepare with FP8
 print("\n[3/4] Preparing with FP8...")
 
-# Verify full fine-tuning is enabled before FP8 conversion
-frozen_before = [(n, p.numel()) for n, p in model.named_parameters() if not p.requires_grad]
-if frozen_before:
-    print(f"  WARNING: {len(frozen_before)} frozen params before FP8, unfreezing...")
-    for param in model.parameters():
-        param.requires_grad = True
+# Manually unfreeze ALL parameters for full fine-tuning
+# (can't use full_finetuning=True due to fused CE loss conflict)
+print("  Unfreezing all parameters for full fine-tuning...")
+for param in model.parameters():
+    param.requires_grad = True
 
 _dummy_opt = torch.optim.AdamW(model.parameters(), lr=1e-5)
 model, _ = accelerator.prepare(model, _dummy_opt)
