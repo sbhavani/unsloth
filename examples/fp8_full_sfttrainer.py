@@ -102,9 +102,6 @@ trainer = SFTTrainer(
     model=model,
     processing_class=tokenizer,
     train_dataset=dataset,
-    dataset_text_field="text",
-    max_seq_length=max_seq_length,
-    packing=False,
     args=SFTConfig(
         per_device_train_batch_size=8,  # Must be >= 8 for FP8 alignment
         gradient_accumulation_steps=2,  # Effective batch = 16
@@ -119,6 +116,9 @@ trainer = SFTTrainer(
         output_dir="outputs",
         report_to="none",
         bf16=True,
+        dataset_text_field="text",
+        max_seq_length=max_seq_length,
+        packing=False,
     ),
 )
 
