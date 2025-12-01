@@ -12,7 +12,7 @@ from datasets import load_dataset
 from trl import SFTTrainer, SFTConfig
 
 print("=" * 80)
-print("BF16 Full Fine-tuning + SFTTrainer (Qwen2.5-7B)")
+print("BF16 Full Fine-tuning + SFTTrainer (Llama-3.2-3B)")
 print("=" * 80)
 
 # Load model with full_finetuning=True
@@ -20,7 +20,7 @@ print("\n[1/3] Loading model...")
 max_seq_length = 512
 
 model, tokenizer = FastLanguageModel.from_pretrained(
-    model_name="unsloth/Qwen2.5-7B",
+    model_name="unsloth/Llama-3.2-3B",
     max_seq_length=max_seq_length,
     dtype=torch.bfloat16,
     load_in_4bit=False,
